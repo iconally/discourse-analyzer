@@ -241,6 +241,28 @@ def build_concept_to_en_label(en_terms: List[Term]) -> Dict[str, str]:
             m[t.concept] = t.term
     return m
 
+def build_concept_to_cn_label(cn_terms: List[Term]) -> Dict[str, str]:
+    """
+    concept -> one CN label (first seen term)
+    """
+    m = {}
+    for t in cn_terms:
+        if t.concept not in m and t.term:
+            m[t.concept] = t.term
+    return m
+
+
+def build_concept_to_category(cn_terms: List[Term]) -> Dict[str, str]:
+    """
+    concept -> category (first seen)
+    """
+    m = {}
+    for t in cn_terms:
+        if t.concept not in m:
+            m[t.concept] = t.category
+    return m
+
+
 
 def build_concept_to_cn_variants(cn_terms: List[Term]) -> Dict[str, str]:
     """
@@ -324,8 +346,11 @@ try:
     else:
         profile_all_view = profile_all
 
-    concept_to_en = build_concept_to_en_label(en_terms) if have_en_terms else {}
-    concept_to_cn = build_concept_to_cn_variants(cn_terms)
+concept_to_en = build_concept_to_en_label(en_terms) if have_en_terms else {}
+concept_to_cn_variants = build_concept_to_cn_variants(cn_terms)
+concept_to_cn_label = build_concept_to_cn_label(cn_terms)
+concept_to_category = build_concept_to_category(cn_terms)
+
 
     # ----------------------------
     # MAIN VIEW: Per-document tabs
@@ -371,13 +396,15 @@ try:
             enriched = []
             for r in per:
                 concept = r["concept"]
-                enriched.append({
-                    "concept": concept,
-                    "EN vertimas": concept_to_en.get(concept, ""),
-                    "category": r.get("category", ""),
-                    "count": int(r.get("count", 0)),
-                    "CN term variants": concept_to_cn.get(concept, ""),
-                })
+enriched.append({
+    "CH term": concept_to_cn_label.get(concept, ""),
+    "vertimas ENG": concept_to_en.get(concept, ""),
+    "concept": concept,
+    "category": concept_to_category.get(concept, r.get("category", "")),
+    "count": int(r.get("count", 0)),
+    "CH term variants": concept_to_cn_variants.get(concept, ""),
+})
+
 
             # sort by count desc
             enriched.sort(key=lambda x: x["count"], reverse=True)
@@ -389,7 +416,7 @@ try:
 
                 st.download_button(
                     "⬇️ Atsisiųsti šio dokumento rezultatus (CSV)",
-                    data=to_csv_bytes(enriched, ["concept", "EN vertimas", "category", "count", "CN term variants"]),
+                    data=to_csv_bytes(enriched, ["CH term", "vertimas ENG", "concept", "category", "count", "CH term variants"]),
                     file_name=f"{d.docid}_concept_counts.csv",
                     mime="text/csv"
                 )
@@ -405,23 +432,26 @@ try:
     all_enriched = []
     for r in profile_all_view:
         c = r["concept"]
-        all_enriched.append({
-            "doc_key": r["doc_key"],
-            "year": r["year"],
-            "order_in_year": r["order_in_year"],
-            "docid": r["docid"],
-            "concept": c,
-            "EN vertimas": concept_to_en.get(c, ""),
-            "category": r.get("category", ""),
-            "count": int(r.get("count", 0)),
-            "CN term variants": concept_to_cn.get(c, ""),
-        })
+all_enriched.append({
+    "doc_key": r["doc_key"],
+    "year": r["year"],
+    "order_in_year": r["order_in_year"],
+    "docid": r["docid"],
+    "CH term": concept_to_cn_label.get(c, ""),
+    "vertimas ENG": concept_to_en.get(c, ""),
+    "concept": c,
+    "category": concept_to_category.get(c, r.get("category", "")),
+    "count": int(r.get("count", 0)),
+    "CH term variants": concept_to_cn_variants.get(c, ""),
+})
+
 
     st.dataframe(all_enriched, use_container_width=True)
 
     st.download_button(
         "⬇️ Atsisiųsti visų dokumentų suvestinę (CSV)",
-        data=to_csv_bytes(all_enriched, ["doc_key","year","order_in_year","docid","concept","EN vertimas","category","count","CN term variants"]),
+        data=to_csv_bytes(all_enriched, ["doc_key","year","order_in_year","docid","CH term","vertimas ENG","concept","category","count","CH term variants"]),
+
         file_name="all_documents_concept_profile.csv",
         mime="text/csv"
     )
