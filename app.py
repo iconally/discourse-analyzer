@@ -1,553 +1,466 @@
-import re
+# app.py
 import io
-import csv
+import re
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
-from collections import Counter, defaultdict
+from typing import Dict, List, Optional, Tuple
 
+import pandas as pd
 import streamlit as st
 
 try:
-    import docx  # python-docx
+    from docx import Document  # python-docx
+    DOCX_AVAILABLE = True
 except Exception:
-    docx = None
-
-try:
-    import jieba
-except Exception:
-    jieba = None
+    DOCX_AVAILABLE = False
 
 
+# -----------------------------
+# Config
+# -----------------------------
 st.set_page_config(
-    page_title="Discourse Analyzer (CN 简体 ↔ EN) — v1.0 + jieba (v2 matching)",
-    layout="wide"
+    page_title="Discourse Analyzer",
+    layout="wide",
 )
 
-# =========================
-# Regex / naming rules
-# =========================
-YEAR_RE = re.compile(r"(20[0-2]\d)")
-DOCID_CN_RE = re.compile(r"(?:^|_)([A-Za-z0-9\-]+)(?:_CN)(?:_|\.)")
-ORDER_RE = re.compile(r"(20[0-2]\d)[_\-\.](\d{1,2})(?=[_\-\.])")
-
-# =========================
-# Models
-# =========================
-@dataclass
-class TermCN:
-    concept: str
-    term: str
-    pinyin: str
-    translation: str
-    category: str
+DEFAULT_TERMS_PATH = "terms_cn.csv"  # keep in repo root
 
 
-@dataclass
-class Doc:
-    lang: str
-    filename: str
-    year: Optional[int]
-    order_in_year: Optional[int]
-    docid: str
-    text: str
+# -----------------------------
+# Helpers
+# -----------------------------
+def safe_str(x) -> str:
+    if x is None:
+        return ""
+    if isinstance(x, float) and pd.isna(x):
+        return ""
+    return str(x)
 
 
-# =========================
-# File reading
-# =========================
-def read_txt(uploaded_file) -> str:
-    raw = uploaded_file.read()
-    for enc in ("utf-8", "utf-8-sig", "gb18030", "big5", "latin-1"):
+def normalize_text(text: str) -> str:
+    # Minimal normalization: unify newlines and strip
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def read_txt(file_bytes: bytes) -> str:
+    # Try utf-8 first, fallback to gb18030, then latin-1
+    for enc in ("utf-8-sig", "utf-8", "gb18030", "big5", "latin-1"):
         try:
-            return raw.decode(enc)
+            return file_bytes.decode(enc)
         except Exception:
             continue
-    return raw.decode("utf-8", errors="replace")
+    # last resort
+    return file_bytes.decode("utf-8", errors="ignore")
 
 
-def read_docx(uploaded_file) -> str:
-    if docx is None:
-        raise RuntimeError("python-docx neįdiegtas arba nepavyko importuoti.")
-    data = uploaded_file.read()
-    bio = io.BytesIO(data)
-    document = docx.Document(bio)
-    return "\n".join(p.text for p in document.paragraphs)
+def read_docx(file_bytes: bytes) -> str:
+    if not DOCX_AVAILABLE:
+        raise RuntimeError("python-docx is not available in this environment.")
+    bio = io.BytesIO(file_bytes)
+    doc = Document(bio)
+    parts = []
+    for p in doc.paragraphs:
+        if p.text:
+            parts.append(p.text)
+    return "\n".join(parts)
 
 
-def detect_year(filename: str) -> Optional[int]:
-    m = YEAR_RE.search(filename)
-    return int(m.group(1)) if m else None
+def load_terms_csv(uploaded_file) -> pd.DataFrame:
+    """
+    Expected columns (semicolon separated):
+    concept;term;pinyin;translation;category
+    """
+    if uploaded_file is None:
+        with open(DEFAULT_TERMS_PATH, "rb") as f:
+            raw = f.read()
+    else:
+        raw = uploaded_file.getvalue()
 
+    # Read with ; separator (as you decided)
+    text = read_txt(raw)
+    df = pd.read_csv(io.StringIO(text), sep=";", dtype=str, keep_default_na=False)
 
-def detect_order_in_year(filename: str) -> Optional[int]:
-    m = ORDER_RE.search(filename)
-    if not m:
-        return None
-    try:
-        return int(m.group(2))
-    except Exception:
-        return None
+    # Normalize headers and required columns
+    df.columns = [c.strip().lower() for c in df.columns]
 
-
-def detect_docid_cn(filename: str) -> Optional[str]:
-    m = DOCID_CN_RE.search(filename)
-    return m.group(1) if m else None
-
-
-def infer_ch_title_from_filename(filename: str) -> str:
-    base = filename
-    base = re.sub(r"\.(txt|docx)$", "", base, flags=re.IGNORECASE)
-    base = re.sub(r"_CN$", "", base, flags=re.IGNORECASE)
-
-    base = re.sub(r"^(20[0-2]\d)[_\-\.](\d{1,2})[_\-\.]", "", base)
-    base = re.sub(r"^(20[0-2]\d)[_\-\.]", "", base)
-
-    docid = detect_docid_cn(filename)
-    if docid:
-        base = re.sub(rf"(?:^|_){re.escape(docid)}(?:_|$)", "_", base)
-
-    base = base.replace("__", "_").strip("_- .")
-    base = re.sub(r"[_\-\.]+", " ", base).strip()
-    return base
-
-
-# =========================
-# CSV helpers (semicolon-first)
-# =========================
-def sniff_delimiter(text: str) -> str:
-    sample = text[:4096]
-    header_line = sample.splitlines()[0] if sample.splitlines() else ""
-    if header_line.count(";") >= 2:
-        return ";"
-    if "\t" in header_line and header_line.count("\t") >= 2:
-        return "\t"
-    if header_line.count(",") >= 2 and ";" not in header_line:
-        return ","
-    return ";"
-
-
-def load_csv_any(uploaded_file) -> List[dict]:
-    content = uploaded_file.getvalue().decode("utf-8-sig", errors="replace")
-    delim = sniff_delimiter(content)
-    reader = csv.DictReader(io.StringIO(content), delimiter=delim)
-    rows = []
-    for r in reader:
-        rows.append({(k or "").strip().lower(): (v or "").strip() for k, v in r.items()})
-    return rows
-
-
-def to_csv_bytes(rows: List[dict], fieldnames: List[str], delimiter: str = ",") -> bytes:
-    out = io.StringIO()
-    w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore", delimiter=delimiter)
-    w.writeheader()
-    for r in rows:
-        w.writerow(r)
-    return out.getvalue().encode("utf-8")
-
-
-# =========================
-# Terms loading (terms_cn v2)
-# =========================
-def load_terms_cn_v2(rows: List[dict]) -> List[TermCN]:
-    required = {"concept", "term", "pinyin", "translation", "category"}
-    if not rows:
-        raise ValueError("terms_cn.csv yra tuščias.")
-    missing = required - set(rows[0].keys())
+    required = ["concept", "term", "pinyin", "translation", "category"]
+    missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(
-            "terms_cn.csv trūksta stulpelių: " + ", ".join(sorted(missing)) +
-            "\nReikia: concept; term; pinyin; translation; category"
+            f"terms_cn.csv is missing required columns: {missing}. "
+            f"Expected: concept;term;pinyin;translation;category"
         )
 
-    out: List[TermCN] = []
-    for r in rows:
-        concept = r.get("concept", "").strip()
-        term = r.get("term", "").strip()
-        pinyin = r.get("pinyin", "").strip()
-        translation = r.get("translation", "").strip()
-        category = r.get("category", "").strip()
-        if concept and term:
-            out.append(TermCN(concept=concept, term=term, pinyin=pinyin, translation=translation, category=category))
-    if not out:
-        raise ValueError("terms_cn.csv neturi nė vienos eilutės su concept ir term.")
+    # Clean whitespace
+    for c in required:
+        df[c] = df[c].astype(str).map(lambda s: s.strip())
+
+    # Drop empty terms
+    df = df[df["term"].map(lambda x: len(x) > 0)].copy()
+
+    # Deduplicate exact rows
+    df = df.drop_duplicates(subset=["concept", "term", "pinyin", "translation", "category"]).reset_index(drop=True)
+
+    return df
+
+
+def count_substring_occurrences(text: str, term: str) -> int:
+    """
+    Count non-overlapping occurrences of `term` in `text`.
+    For Chinese terms (multi-char), this is usually fine.
+    """
+    if not term:
+        return 0
+    # Escape regex special chars
+    pattern = re.escape(term)
+    return len(re.findall(pattern, text))
+
+
+def analyze_text(text: str, terms_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns a term-level results dataframe with columns:
+    term, pinyin, translation, concept, category, count
+    """
+    text = normalize_text(text)
+
+    rows = []
+    # Iterate terms; for large dictionaries you can optimize later, but this is stable.
+    for _, r in terms_df.iterrows():
+        term = safe_str(r["term"])
+        cnt = count_substring_occurrences(text, term)
+        if cnt > 0:
+            rows.append(
+                {
+                    "CH term": term,
+                    "Pinyin": safe_str(r["pinyin"]),
+                    "ENG translation": safe_str(r["translation"]),
+                    "Concept": safe_str(r["concept"]),
+                    "Category": safe_str(r["category"]),
+                    "Count": int(cnt),
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=["CH term", "Pinyin", "ENG translation", "Concept", "Category", "Count"])
+
+    df = pd.DataFrame(rows)
+
+    # Combine duplicates just in case (same term may appear multiple times in csv)
+    df = (
+        df.groupby(["CH term", "Pinyin", "ENG translation", "Concept", "Category"], as_index=False)["Count"]
+        .sum()
+        .sort_values(["Category", "Concept", "Count"], ascending=[True, True, False])
+        .reset_index(drop=True)
+    )
+    return df
+
+
+def category_summary(term_hits: pd.DataFrame, terms_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Category summary per document:
+    - unique_terms_detected
+    - total_count
+    - coverage (detected unique terms / total unique terms in dictionary for category)
+    - share (category_total_count / total_count_all_categories)
+    """
+    if term_hits.empty:
+        return pd.DataFrame(columns=["Category", "Unique terms", "Total count", "Coverage", "Share"])
+
+    # Totals in dictionary
+    dict_totals = (
+        terms_df.groupby("category")["term"]
+        .nunique()
+        .rename("Dict terms")
+        .reset_index()
+        .rename(columns={"category": "Category"})
+    )
+
+    # Detected per category
+    detected = (
+        term_hits.groupby("Category")
+        .agg(**{"Unique terms": ("CH term", "nunique"), "Total count": ("Count", "sum")})
+        .reset_index()
+    )
+
+    out = detected.merge(dict_totals, on="Category", how="left")
+    out["Dict terms"] = out["Dict terms"].fillna(0).astype(int)
+
+    out["Coverage"] = out.apply(
+        lambda r: (r["Unique terms"] / r["Dict terms"]) if r["Dict terms"] > 0 else 0.0,
+        axis=1,
+    )
+
+    total_all = out["Total count"].sum()
+    out["Share"] = out["Total count"].apply(lambda x: (x / total_all) if total_all > 0 else 0.0)
+
+    # Formatting helpers (keep raw numeric too)
+    out = out.sort_values(["Total count", "Unique terms"], ascending=[False, False]).reset_index(drop=True)
+
+    # Human-readable
+    out["Coverage"] = out["Coverage"].map(lambda x: f"{x:.1%}")
+    out["Share"] = out["Share"].map(lambda x: f"{x:.1%}")
+
+    # Keep Dict terms visible for methodological clarity
+    out = out[["Category", "Unique terms", "Total count", "Coverage", "Share", "Dict terms"]]
     return out
 
 
-def build_concept_maps_cn(terms_cn: List[TermCN]) -> Tuple[
-    Dict[str, List[TermCN]],     # concept -> list of variants
-    Dict[str, str],              # concept -> category
-]:
-    concept_to_variants: Dict[str, List[TermCN]] = defaultdict(list)
-    concept_to_category: Dict[str, str] = {}
-
-    for t in terms_cn:
-        concept_to_variants[t.concept].append(t)
-        if t.concept not in concept_to_category:
-            concept_to_category[t.concept] = t.category
-
-    # dedupe by term preserve order
-    for c, lst in list(concept_to_variants.items()):
-        seen = set()
-        uniq = []
-        for v in lst:
-            if v.term in seen:
-                continue
-            seen.add(v.term)
-            uniq.append(v)
-        concept_to_variants[c] = uniq
-
-    return concept_to_variants, concept_to_category
-
-
-# =========================
-# Docs ingest
-# =========================
-def ingest_cn_docs(files) -> List[Doc]:
-    docs: List[Doc] = []
-    for f in files:
-        name = f.name
-        year = detect_year(name)
-        order = detect_order_in_year(name)
-        docid = detect_docid_cn(name)
-
-        if not docid:
-            raise ValueError(
-                f"Nepavyko nustatyti DocID iš CN failo pavadinimo: {name}\n"
-                f"Reikia formato su ..._DOCID_CN..., pvz: 2020_01_DOC123_CN.txt"
-            )
-
-        ext = name.lower().split(".")[-1]
-        if ext == "txt":
-            text = read_txt(f)
-        elif ext == "docx":
-            text = read_docx(f)
-        elif ext == "doc":
-            raise ValueError(f"Failas {name} yra .doc. Konvertuok į .docx.")
-        else:
-            raise ValueError(f"Nepalaikomas formatas: {name}. Naudok .txt arba .docx.")
-
-        docs.append(Doc(lang="CN", filename=name, year=year, order_in_year=order, docid=docid, text=text))
-
-    docs.sort(key=lambda d: (d.year or 9999, d.order_in_year or 9999, d.filename))
-    return docs
-
-
-# =========================
-# Matching methods
-# =========================
-def build_substring_patterns(terms_cn: List[TermCN]) -> Dict[Tuple[str, str], re.Pattern]:
-    return {(t.concept, t.term): re.compile(re.escape(t.term)) for t in terms_cn}
-
-
-@st.cache_data(show_spinner=False)
-def jieba_tokenize(text: str, add_words: Tuple[str, ...]) -> List[str]:
+def concept_summary(term_hits: pd.DataFrame) -> pd.DataFrame:
     """
-    Tokenize with jieba; add_words are inserted into jieba dictionary so that
-    domain terms (业力, 天命, 道德, etc.) become tokens.
+    Concept-level summary (grouped by Concept).
+    Shows:
+    - Total count (sum across terms)
+    - Unique terms detected
+    - Category (if multiple, show comma-joined unique list)
     """
-    if jieba is None:
-        raise RuntimeError("Paketas 'jieba' neįdiegtas. Pridėk jieba į requirements.txt.")
-    # Add custom words to improve segmentation stability
-    for w in add_words:
-        if w:
-            try:
-                jieba.add_word(w)
-            except Exception:
-                pass
-    return list(jieba.cut(text, cut_all=False))
+    if term_hits.empty:
+        return pd.DataFrame(columns=["Concept", "Category", "Unique terms", "Total count"])
+
+    tmp = term_hits.copy()
+
+    grouped = (
+        tmp.groupby("Concept")
+        .agg(
+            **{
+                "Total count": ("Count", "sum"),
+                "Unique terms": ("CH term", "nunique"),
+                "Category": ("Category", lambda s: ", ".join(sorted(set([safe_str(x) for x in s if safe_str(x)])))),
+            }
+        )
+        .reset_index()
+        .sort_values(["Total count", "Unique terms"], ascending=[False, False])
+        .reset_index(drop=True)
+    )
+    return grouped[["Concept", "Category", "Unique terms", "Total count"]]
 
 
-def analyze_cn_docs_termlevel(
-    docs: List[Doc],
-    terms_cn: List[TermCN],
-    match_mode: str,  # "jieba_tokens" or "substring"
-) -> Tuple[
-    Dict[str, Dict[str, Counter]],   # docid -> concept -> Counter(term -> count)
-    Dict[str, Dict[str, int]]        # docid -> concept -> total_count
-]:
+def get_file_text(uploaded) -> Tuple[Optional[str], Optional[str]]:
     """
-    Term-level counts, then concept totals.
-    - substring: count exact substring occurrences (old behavior)
-    - jieba_tokens: tokenize and count exact token matches (recommended)
-      plus we add every term into jieba dict to make them tokens.
+    Returns (text, error_message)
     """
-    per_doc_concept_term_counts: Dict[str, Dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
-    per_doc_concept_total: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    name = uploaded.name
+    data = uploaded.getvalue()
+    lower = name.lower()
 
-    if match_mode == "substring":
-        patterns = build_substring_patterns(terms_cn)
-        for d in docs:
-            for t in terms_cn:
-                cnt = len(patterns[(t.concept, t.term)].findall(d.text))
-                if cnt > 0:
-                    per_doc_concept_term_counts[d.docid][t.concept][t.term] += cnt
-                    per_doc_concept_total[d.docid][t.concept] += cnt
-        return per_doc_concept_term_counts, per_doc_concept_total
+    if lower.endswith(".txt"):
+        return normalize_text(read_txt(data)), None
 
-    if match_mode == "jieba_tokens":
-        if jieba is None:
-            raise RuntimeError("Paketas 'jieba' neįdiegtas. Pridėk jieba į requirements.txt.")
-        # Add ALL terms to jieba to reduce false negatives (e.g., 业力, 天命)
-        all_terms = tuple(sorted({t.term for t in terms_cn if t.term}))
-        # Build quick lookups
-        term_to_concept = defaultdict(set)
-        for t in terms_cn:
-            term_to_concept[t.term].add(t.concept)
+    if lower.endswith(".docx"):
+        try:
+            return normalize_text(read_docx(data)), None
+        except Exception as e:
+            return None, f"Nepavyko perskaityti DOCX: {e}"
 
-        for d in docs:
-            tokens = jieba_tokenize(d.text, add_words=all_terms)
-            tok_counts = Counter(tokens)
-            for term, freq in tok_counts.items():
-                if term in term_to_concept and freq > 0:
-                    for concept in term_to_concept[term]:
-                        per_doc_concept_term_counts[d.docid][concept][term] += freq
-                        per_doc_concept_total[d.docid][concept] += freq
-        return per_doc_concept_term_counts, per_doc_concept_total
+    if lower.endswith(".doc"):
+        return None, (
+            "DOC formatas dažnai nėra patikimai skaitomas be papildomų serverio įrankių. "
+            "Rekomendacija: išsaugok kaip DOCX arba TXT ir įkelk iš naujo."
+        )
 
-    raise ValueError("Nežinomas match_mode. Naudok: jieba_tokens arba substring.")
+    return None, "Palaikomi formatai: .txt ir .docx (DOC – konvertuoti į DOCX)."
 
 
-def build_doc_table_rows(
-    doc: Doc,
-    all_concepts: List[str],
-    per_doc_concept_term_counts: Dict[str, Dict[str, Counter]],
-    per_doc_concept_total: Dict[str, Dict[str, int]],
-    concept_to_variants: Dict[str, List[TermCN]],
-    concept_to_category: Dict[str, str],
-    show_zero: bool
-) -> List[dict]:
-    """
-    Per-document table columns:
-    CH term | pinyin | translation | concept | category | count | CH term variants
-    """
-    rows: List[dict] = []
-    docid = doc.docid
-    concept_totals = per_doc_concept_total.get(docid, {})
-    concept_terms = per_doc_concept_term_counts.get(docid, {})
-
-    # helper lookup: (concept, term) -> TermCN
-    variant_lookup: Dict[Tuple[str, str], TermCN] = {}
-    for c, lst in concept_to_variants.items():
-        for v in lst:
-            variant_lookup[(c, v.term)] = v
-
-    for concept in all_concepts:
-        total = int(concept_totals.get(concept, 0))
-        if (not show_zero) and total == 0:
-            continue
-
-        # Dominant term in THIS document
-        dominant_term = ""
-        dominant_pinyin = ""
-        dominant_translation = ""
-
-        ctr = concept_terms.get(concept)
-        if ctr and len(ctr) > 0:
-            dominant_term = ctr.most_common(1)[0][0]
-            v = variant_lookup.get((concept, dominant_term))
-            if v:
-                dominant_pinyin = v.pinyin
-                dominant_translation = v.translation
-        else:
-            # fallback to first variant
-            variants = concept_to_variants.get(concept, [])
-            if variants:
-                dominant_term = variants[0].term
-                dominant_pinyin = variants[0].pinyin
-                dominant_translation = variants[0].translation
-
-        variants_disp = []
-        for v in concept_to_variants.get(concept, []):
-            part = v.term
-            if v.pinyin:
-                part += f" ({v.pinyin})"
-            if v.translation:
-                part += f" – {v.translation}"
-            variants_disp.append(part)
-
-        rows.append({
-            "CH term": dominant_term,
-            "pinyin": dominant_pinyin,
-            "translation": dominant_translation,
-            "concept": concept,
-            "category": concept_to_category.get(concept, ""),
-            "count": total,
-            "CH term variants": " / ".join(variants_disp),
-        })
-
-    rows.sort(key=lambda r: r["count"], reverse=True)
-    return rows
+@dataclass
+class DocMeta:
+    year: str = ""
+    title_cn: str = ""
 
 
-# =========================
+def meta_key(filename: str) -> str:
+    return f"doc_meta::{filename}"
+
+
+def ensure_doc_meta(filename: str):
+    k = meta_key(filename)
+    if k not in st.session_state:
+        st.session_state[k] = {"year": "", "title_cn": ""}
+
+
+# -----------------------------
 # UI
-# =========================
-st.title("Discourse Analyzer (CN 简体 ↔ EN) — v1.0 + jieba (v2 matching)")
-st.caption(
-    "Pagrindinė problema su 业 išsprendžiama per tokenizaciją: 制造业/产业/工业 tampa atskirais tokenais, "
-    "o religiniams atvejams naudoji 业力/业报/业障 ir pan. (įrašyti kaip term variantus)."
-)
+# -----------------------------
+st.title("Discourse Analyzer (CN religious-coded terms)")
 
 with st.sidebar:
-    st.header("1) Dokumentai")
-    cn_files = st.file_uploader(
-        "CN originalai (.txt, .docx)",
+    st.header("Žodynas (terms_cn.csv)")
+    st.caption("CSV formatas: concept;term;pinyin;translation;category")
+    terms_upload = st.file_uploader("Įkelk terms_cn.csv (nebūtina, jei yra repo)", type=["csv"])
+    st.divider()
+
+    st.header("Dokumentai")
+    files = st.file_uploader(
+        "Įkelk dokumentus (TXT / DOCX)",
         type=["txt", "docx", "doc"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
     )
-    st.caption("Rekomenduojamas pavadinimas: 2020_01_DOC123_CN.txt (arba .docx)")
-
-    st.header("2) Žodynas")
-    cn_terms_file = st.file_uploader(
-        "terms_cn.csv (concept; term; pinyin; translation; category)",
-        type=["csv"]
-    )
-    st.caption("Naudok ';' kaip stulpelių skirtuką.")
-
-    st.header("3) Matching (V2)")
-    match_mode = st.selectbox(
-        "Kaip skaičiuoti terminus?",
-        options=["jieba_tokens", "substring"],
-        index=0,
-        help=(
-            "jieba_tokens (rekomenduojama): segmentuoja tekstą ir skaičiuoja tikslius žodžių tokenus.\n"
-            "substring: skaičiuoja tikslius substring pasikartojimus (senas elgesys)."
-        )
-    )
-
-    st.header("4) Nustatymai")
-    show_zero = st.checkbox("Rodyti ir concept su count=0", value=False)
-
-run = st.button("▶️ Analizuoti", type="primary")
-
-if not run:
-    st.info("Įkelk CN dokumentus + terms_cn.csv ir paspausk **Analizuoti**.")
-    st.stop()
-
-try:
-    if not cn_files:
-        st.warning("Įkelk bent 1 CN dokumentą.")
-        st.stop()
-    if not cn_terms_file:
-        st.warning("Įkelk terms_cn.csv.")
-        st.stop()
-
-    # Safety: if user chose jieba but not installed
-    if match_mode == "jieba_tokens" and jieba is None:
-        st.error("Pasirinkai jieba_tokens, bet 'jieba' nėra įdiegtas. Įrašyk jieba į requirements.txt ir redeploy.")
-        st.stop()
-
-    # Load terms
-    terms_cn_rows = load_csv_any(cn_terms_file)
-    terms_cn = load_terms_cn_v2(terms_cn_rows)
-
-    concept_to_variants, concept_to_category = build_concept_maps_cn(terms_cn)
-    all_concepts = sorted(concept_to_category.keys())
-
-    # Ingest docs
-    docs_cn = ingest_cn_docs(cn_files)
-
-    # Analyze with chosen matching
-    per_doc_concept_term_counts, per_doc_concept_total = analyze_cn_docs_termlevel(
-        docs_cn, terms_cn, match_mode=match_mode
-    )
-
-    # Tabs per doc
-    st.subheader("Dokumentų analizė po vieną (CN)")
-
-    tab_labels = []
-    for d in docs_cn:
-        y = d.year if d.year is not None else "????"
-        tab_labels.append(f"{y} | {d.docid}")
-    tabs = st.tabs(tab_labels)
-
-    all_docs_rows: List[dict] = []
-
-    for d, tab in zip(docs_cn, tabs):
-        with tab:
-            st.markdown("### Dokumento informacija")
-            st.write({
-                "Metai": d.year,
-                "Eilė metuose (jei yra)": d.order_in_year,
-                "DocID": d.docid,
-                "Kalba": "CN (简体)",
-                "CH pavadinimas (iš failo vardo)": infer_ch_title_from_filename(d.filename),
-                "Pilnas failo vardas": d.filename,
-                "Matching režimas": match_mode,
-            })
-
-            st.markdown("### Raktažodžių (concept) lentelė")
-            rows = build_doc_table_rows(
-                doc=d,
-                all_concepts=all_concepts,
-                per_doc_concept_term_counts=per_doc_concept_term_counts,
-                per_doc_concept_total=per_doc_concept_total,
-                concept_to_variants=concept_to_variants,
-                concept_to_category=concept_to_category,
-                show_zero=show_zero
-            )
-
-            if not rows:
-                st.info("Šiame dokumente nerasta raktažodžių (arba visi count=0).")
-            else:
-                st.dataframe(rows, use_container_width=True)
-
-                st.download_button(
-                    "⬇️ Atsisiųsti šio dokumento lentelę (CSV)",
-                    data=to_csv_bytes(
-                        rows,
-                        ["CH term", "pinyin", "translation", "concept", "category", "count", "CH term variants"]
-                    ),
-                    file_name=f"{d.docid}_concept_table.csv",
-                    mime="text/csv"
-                )
-
-            for r in rows:
-                all_docs_rows.append({
-                    "year": d.year,
-                    "order_in_year": d.order_in_year,
-                    "docid": d.docid,
-                    "filename": d.filename,
-                    "CH term": r["CH term"],
-                    "pinyin": r["pinyin"],
-                    "translation": r["translation"],
-                    "concept": r["concept"],
-                    "category": r["category"],
-                    "count": r["count"],
-                    "CH term variants": r["CH term variants"],
-                    "match_mode": match_mode,
-                })
+    st.caption("DOC rekomenduojama konvertuoti į DOCX arba TXT.")
 
     st.divider()
-    st.subheader("Bendra suvestinė (visi CN dokumentai)")
+    st.header("Rodymas / filtrai")
+    show_zero_rows = st.checkbox("Rodyti termus su 0 (nerekomenduojama)", value=False, disabled=True)
+    # Paliekam vietą ateičiai (v2): substring vs token
+    st.caption("V2 idėja: substring vs token (jieba/pkuseg) — kol kas substring.")
 
-    if all_docs_rows:
-        all_docs_rows.sort(key=lambda x: (
-            x["year"] if x["year"] is not None else 9999,
-            x["order_in_year"] if x["order_in_year"] is not None else 9999,
-            x["docid"],
-            -int(x["count"]),
-            x["category"],
-            x["concept"],
-        ))
-        st.dataframe(all_docs_rows, use_container_width=True)
 
-        st.download_button(
-            "⬇️ Atsisiųsti visų dokumentų suvestinę (CSV)",
-            data=to_csv_bytes(
-                all_docs_rows,
-                ["year", "order_in_year", "docid", "filename",
-                 "CH term", "pinyin", "translation", "concept", "category", "count", "CH term variants",
-                 "match_mode"]
-            ),
-            file_name="all_documents_concept_profile.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("Nėra duomenų suvestinei.")
-
-    st.success("Baigta ✅ (jieba matching paruoštas)")
-
+# Load dictionary
+try:
+    terms_df_raw = load_terms_csv(terms_upload)
 except Exception as e:
-    st.error(f"Klaida: {e}")
+    st.error(f"Klaida skaitant terms_cn.csv: {e}")
     st.stop()
+
+# Normalize dictionary column casing for internal use
+terms_df = terms_df_raw.copy()
+terms_df["concept"] = terms_df["concept"].astype(str)
+terms_df["term"] = terms_df["term"].astype(str)
+terms_df["pinyin"] = terms_df["pinyin"].astype(str)
+terms_df["translation"] = terms_df["translation"].astype(str)
+terms_df["category"] = terms_df["category"].astype(str)
+
+st.success(f"Žodynas užkrautas: {len(terms_df):,} eilučių, {terms_df['term'].nunique():,} unikalių termų.")
+
+if not files:
+    st.info("Įkelk bent vieną dokumentą (TXT/DOCX), kad pamatytum analizę.")
+    st.stop()
+
+# Read all docs first and keep only valid
+docs: List[Tuple[str, str]] = []  # (filename, text)
+read_errors: Dict[str, str] = {}
+
+for f in files:
+    text, err = get_file_text(f)
+    if err:
+        read_errors[f.name] = err
+    else:
+        docs.append((f.name, text))
+
+if read_errors:
+    with st.expander("Dokumentų skaitymo problemos", expanded=True):
+        for fn, msg in read_errors.items():
+            st.warning(f"**{fn}**: {msg}")
+
+if not docs:
+    st.error("Nė vieno dokumento nepavyko nuskaityti. Įkelk TXT arba DOCX.")
+    st.stop()
+
+# Tabs per document
+tab_names = [fn for fn, _ in docs]
+tabs = st.tabs(tab_names)
+
+for (filename, text), tab in zip(docs, tabs):
+    ensure_doc_meta(filename)
+
+    with tab:
+        # -----------------------------
+        # Document info block
+        # -----------------------------
+        st.subheader("Document info")
+
+        col1, col2, col3 = st.columns([1, 2, 2])
+        with col1:
+            year_val = st.text_input(
+                "Metai (Year)",
+                value=st.session_state[meta_key(filename)]["year"],
+                key=f"year::{filename}",
+                placeholder="pvz. 2017",
+            )
+        with col2:
+            title_cn_val = st.text_input(
+                "Pavadinimas (CN)",
+                value=st.session_state[meta_key(filename)]["title_cn"],
+                key=f"title_cn::{filename}",
+                placeholder="pvz. 新一代人工智能发展规划",
+            )
+        with col3:
+            st.text_input("Pilnas failo pavadinimas", value=filename, disabled=True)
+
+        # Persist
+        st.session_state[meta_key(filename)]["year"] = year_val
+        st.session_state[meta_key(filename)]["title_cn"] = title_cn_val
+
+        # Optional small stats
+        with st.expander("Teksto statistika", expanded=False):
+            st.write(
+                {
+                    "Characters": len(text),
+                    "Lines": text.count("\n") + 1 if text else 0,
+                }
+            )
+
+        st.divider()
+
+        # -----------------------------
+        # Analysis
+        # -----------------------------
+        st.subheader("Analizė")
+
+        term_hits = analyze_text(text, terms_df)
+
+        total_hits = int(term_hits["Count"].sum()) if not term_hits.empty else 0
+        unique_terms = int(term_hits["CH term"].nunique()) if not term_hits.empty else 0
+        unique_concepts = int(term_hits["Concept"].nunique()) if not term_hits.empty else 0
+        unique_categories = int(term_hits["Category"].nunique()) if not term_hits.empty else 0
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total matches", total_hits)
+        m2.metric("Unique terms", unique_terms)
+        m3.metric("Unique concepts", unique_concepts)
+        m4.metric("Categories hit", unique_categories)
+
+        # -----------------------------
+        # Category summary (with coverage + share)
+        # -----------------------------
+        st.markdown("### 1) Category summary")
+        cat_sum = category_summary(term_hits, terms_df)
+
+        if cat_sum.empty:
+            st.info("Šiame dokumente nerasta nė vieno termino iš žodyno.")
+        else:
+            st.dataframe(cat_sum, width="stretch")
+
+        # -----------------------------
+        # Concept summary
+        # -----------------------------
+        st.markdown("### 2) Concept summary")
+        conc_sum = concept_summary(term_hits)
+        if conc_sum.empty:
+            st.info("Nėra concept rezultatų (nes nėra termų).")
+        else:
+            st.dataframe(conc_sum, width="stretch")
+
+        # -----------------------------
+        # Term detail
+        # -----------------------------
+        st.markdown("### 3) Term detail")
+        if term_hits.empty:
+            st.info("Nėra termų detalių (nes nėra hitų).")
+        else:
+            st.dataframe(term_hits, width="stretch")
+
+            # Downloads
+            cdl1, cdl2 = st.columns(2)
+            with cdl1:
+                st.download_button(
+                    "Download term detail (CSV)",
+                    data=term_hits.to_csv(index=False).encode("utf-8-sig"),
+                    file_name=f"{filename}_term_detail.csv",
+                    mime="text/csv",
+                )
+            with cdl2:
+                # Build a single CSV with category+concept summary for convenience
+                summary_pack = {
+                    "category_summary": cat_sum,
+                    "concept_summary": conc_sum,
+                }
+                # Write a simple multi-section CSV
+                out = io.StringIO()
+                out.write("=== CATEGORY SUMMARY ===\n")
+                cat_sum.to_csv(out, index=False)
+                out.write("\n=== CONCEPT SUMMARY ===\n")
+                conc_sum.to_csv(out, index=False)
+
+                st.download_button(
+                    "Download summaries (CSV)",
+                    data=out.getvalue().encode("utf-8-sig"),
+                    file_name=f"{filename}_summaries.csv",
+                    mime="text/csv",
+                )
