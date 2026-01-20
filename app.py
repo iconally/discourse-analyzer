@@ -12,9 +12,14 @@ try:
 except Exception:
     docx = None
 
+try:
+    import jieba
+except Exception:
+    jieba = None
+
 
 st.set_page_config(
-    page_title="Discourse Analyzer (CN 简体 ↔ EN) — v1.0 (terms_cn v2)",
+    page_title="Discourse Analyzer (CN 简体 ↔ EN) — v1.0 + jieba (v2 matching)",
     layout="wide"
 )
 
@@ -22,10 +27,8 @@ st.set_page_config(
 # Regex / naming rules
 # =========================
 YEAR_RE = re.compile(r"(20[0-2]\d)")
-# expects ..._DOCID_CN.(txt|docx)
 DOCID_CN_RE = re.compile(r"(?:^|_)([A-Za-z0-9\-]+)(?:_CN)(?:_|\.)")
 ORDER_RE = re.compile(r"(20[0-2]\d)[_\-\.](\d{1,2})(?=[_\-\.])")
-
 
 # =========================
 # Models
@@ -92,23 +95,13 @@ def detect_docid_cn(filename: str) -> Optional[str]:
 
 
 def infer_ch_title_from_filename(filename: str) -> str:
-    """
-    Human-friendly title from filename by removing:
-    - year / order
-    - docid
-    - _CN
-    - extension
-    Then converts underscores/dashes to spaces.
-    """
     base = filename
     base = re.sub(r"\.(txt|docx)$", "", base, flags=re.IGNORECASE)
     base = re.sub(r"_CN$", "", base, flags=re.IGNORECASE)
 
-    # remove leading year/order if present
     base = re.sub(r"^(20[0-2]\d)[_\-\.](\d{1,2})[_\-\.]", "", base)
     base = re.sub(r"^(20[0-2]\d)[_\-\.]", "", base)
 
-    # remove docid if detectable
     docid = detect_docid_cn(filename)
     if docid:
         base = re.sub(rf"(?:^|_){re.escape(docid)}(?:_|$)", "_", base)
@@ -122,11 +115,7 @@ def infer_ch_title_from_filename(filename: str) -> str:
 # CSV helpers (semicolon-first)
 # =========================
 def sniff_delimiter(text: str) -> str:
-    """
-    Prefer ';' for your use-case, but try to sniff.
-    """
     sample = text[:4096]
-    # Strong preference: if semicolons exist in header, use ';'
     header_line = sample.splitlines()[0] if sample.splitlines() else ""
     if header_line.count(";") >= 2:
         return ";"
@@ -134,7 +123,6 @@ def sniff_delimiter(text: str) -> str:
         return "\t"
     if header_line.count(",") >= 2 and ";" not in header_line:
         return ","
-    # fallback
     return ";"
 
 
@@ -185,15 +173,8 @@ def load_terms_cn_v2(rows: List[dict]) -> List[TermCN]:
     return out
 
 
-def build_cn_patterns(terms_cn: List[TermCN]) -> Dict[Tuple[str, str], re.Pattern]:
-    """
-    Exact substring match for CN (no segmentation).
-    """
-    return {(t.concept, t.term): re.compile(re.escape(t.term)) for t in terms_cn}
-
-
 def build_concept_maps_cn(terms_cn: List[TermCN]) -> Tuple[
-    Dict[str, List[TermCN]],     # concept -> list of variants (TermCN)
+    Dict[str, List[TermCN]],     # concept -> list of variants
     Dict[str, str],              # concept -> category
 ]:
     concept_to_variants: Dict[str, List[TermCN]] = defaultdict(list)
@@ -204,15 +185,15 @@ def build_concept_maps_cn(terms_cn: List[TermCN]) -> Tuple[
         if t.concept not in concept_to_category:
             concept_to_category[t.concept] = t.category
 
-    # de-duplicate variants by term (preserve first occurrence)
+    # dedupe by term preserve order
     for c, lst in list(concept_to_variants.items()):
-        seen_terms = set()
+        seen = set()
         uniq = []
-        for item in lst:
-            if item.term in seen_terms:
+        for v in lst:
+            if v.term in seen:
                 continue
-            seen_terms.add(item.term)
-            uniq.append(item)
+            seen.add(v.term)
+            uniq.append(v)
         concept_to_variants[c] = uniq
 
     return concept_to_variants, concept_to_category
@@ -252,29 +233,78 @@ def ingest_cn_docs(files) -> List[Doc]:
 
 
 # =========================
-# Analysis core (term-level, then concept-level totals)
+# Matching methods
 # =========================
+def build_substring_patterns(terms_cn: List[TermCN]) -> Dict[Tuple[str, str], re.Pattern]:
+    return {(t.concept, t.term): re.compile(re.escape(t.term)) for t in terms_cn}
+
+
+@st.cache_data(show_spinner=False)
+def jieba_tokenize(text: str, add_words: Tuple[str, ...]) -> List[str]:
+    """
+    Tokenize with jieba; add_words are inserted into jieba dictionary so that
+    domain terms (业力, 天命, 道德, etc.) become tokens.
+    """
+    if jieba is None:
+        raise RuntimeError("Paketas 'jieba' neįdiegtas. Pridėk jieba į requirements.txt.")
+    # Add custom words to improve segmentation stability
+    for w in add_words:
+        if w:
+            try:
+                jieba.add_word(w)
+            except Exception:
+                pass
+    return list(jieba.cut(text, cut_all=False))
+
+
 def analyze_cn_docs_termlevel(
     docs: List[Doc],
     terms_cn: List[TermCN],
+    match_mode: str,  # "jieba_tokens" or "substring"
 ) -> Tuple[
     Dict[str, Dict[str, Counter]],   # docid -> concept -> Counter(term -> count)
     Dict[str, Dict[str, int]]        # docid -> concept -> total_count
 ]:
-    patterns = build_cn_patterns(terms_cn)
-
+    """
+    Term-level counts, then concept totals.
+    - substring: count exact substring occurrences (old behavior)
+    - jieba_tokens: tokenize and count exact token matches (recommended)
+      plus we add every term into jieba dict to make them tokens.
+    """
     per_doc_concept_term_counts: Dict[str, Dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
     per_doc_concept_total: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
-    for d in docs:
-        for t in terms_cn:
-            pat = patterns[(t.concept, t.term)]
-            cnt = len(pat.findall(d.text))
-            if cnt > 0:
-                per_doc_concept_term_counts[d.docid][t.concept][t.term] += cnt
-                per_doc_concept_total[d.docid][t.concept] += cnt
+    if match_mode == "substring":
+        patterns = build_substring_patterns(terms_cn)
+        for d in docs:
+            for t in terms_cn:
+                cnt = len(patterns[(t.concept, t.term)].findall(d.text))
+                if cnt > 0:
+                    per_doc_concept_term_counts[d.docid][t.concept][t.term] += cnt
+                    per_doc_concept_total[d.docid][t.concept] += cnt
+        return per_doc_concept_term_counts, per_doc_concept_total
 
-    return per_doc_concept_term_counts, per_doc_concept_total
+    if match_mode == "jieba_tokens":
+        if jieba is None:
+            raise RuntimeError("Paketas 'jieba' neįdiegtas. Pridėk jieba į requirements.txt.")
+        # Add ALL terms to jieba to reduce false negatives (e.g., 业力, 天命)
+        all_terms = tuple(sorted({t.term for t in terms_cn if t.term}))
+        # Build quick lookups
+        term_to_concept = defaultdict(set)
+        for t in terms_cn:
+            term_to_concept[t.term].add(t.concept)
+
+        for d in docs:
+            tokens = jieba_tokenize(d.text, add_words=all_terms)
+            tok_counts = Counter(tokens)
+            for term, freq in tok_counts.items():
+                if term in term_to_concept and freq > 0:
+                    for concept in term_to_concept[term]:
+                        per_doc_concept_term_counts[d.docid][concept][term] += freq
+                        per_doc_concept_total[d.docid][concept] += freq
+        return per_doc_concept_term_counts, per_doc_concept_total
+
+    raise ValueError("Nežinomas match_mode. Naudok: jieba_tokens arba substring.")
 
 
 def build_doc_table_rows(
@@ -295,7 +325,7 @@ def build_doc_table_rows(
     concept_totals = per_doc_concept_total.get(docid, {})
     concept_terms = per_doc_concept_term_counts.get(docid, {})
 
-    # helper: find TermCN by (concept, term)
+    # helper lookup: (concept, term) -> TermCN
     variant_lookup: Dict[Tuple[str, str], TermCN] = {}
     for c, lst in concept_to_variants.items():
         for v in lst:
@@ -306,7 +336,7 @@ def build_doc_table_rows(
         if (not show_zero) and total == 0:
             continue
 
-        # Dominant CN term in this doc
+        # Dominant term in THIS document
         dominant_term = ""
         dominant_pinyin = ""
         dominant_translation = ""
@@ -319,14 +349,13 @@ def build_doc_table_rows(
                 dominant_pinyin = v.pinyin
                 dominant_translation = v.translation
         else:
-            # fallback to first variant in dictionary
+            # fallback to first variant
             variants = concept_to_variants.get(concept, [])
             if variants:
                 dominant_term = variants[0].term
                 dominant_pinyin = variants[0].pinyin
                 dominant_translation = variants[0].translation
 
-        # variants display: term (pinyin) – translation
         variants_disp = []
         for v in concept_to_variants.get(concept, []):
             part = v.term
@@ -353,11 +382,10 @@ def build_doc_table_rows(
 # =========================
 # UI
 # =========================
-st.title("Discourse Analyzer (CN 简体 ↔ EN) — v1.0 (terms_cn v2)")
+st.title("Discourse Analyzer (CN 简体 ↔ EN) — v1.0 + jieba (v2 matching)")
 st.caption(
-    "V1.0: dokumentai analizuojami po vieną (tab’ai). "
-    "terms_cn.csv struktūra: concept; term; pinyin; translation; category (skirtukas ';'). "
-    "CH term = dominuojantis CN term variante dokumente; count = concept suma per variants."
+    "Pagrindinė problema su 业 išsprendžiama per tokenizaciją: 制造业/产业/工业 tampa atskirais tokenais, "
+    "o religiniams atvejams naudoji 业力/业报/业障 ir pan. (įrašyti kaip term variantus)."
 )
 
 with st.sidebar:
@@ -374,9 +402,20 @@ with st.sidebar:
         "terms_cn.csv (concept; term; pinyin; translation; category)",
         type=["csv"]
     )
-    st.caption("Svarbu: naudok ';' kaip stulpelių skirtuką (nes reikšmėse gali būti ',' ir '/').")
+    st.caption("Naudok ';' kaip stulpelių skirtuką.")
 
-    st.header("3) Nustatymai")
+    st.header("3) Matching (V2)")
+    match_mode = st.selectbox(
+        "Kaip skaičiuoti terminus?",
+        options=["jieba_tokens", "substring"],
+        index=0,
+        help=(
+            "jieba_tokens (rekomenduojama): segmentuoja tekstą ir skaičiuoja tikslius žodžių tokenus.\n"
+            "substring: skaičiuoja tikslius substring pasikartojimus (senas elgesys)."
+        )
+    )
+
+    st.header("4) Nustatymai")
     show_zero = st.checkbox("Rodyti ir concept su count=0", value=False)
 
 run = st.button("▶️ Analizuoti", type="primary")
@@ -393,7 +432,12 @@ try:
         st.warning("Įkelk terms_cn.csv.")
         st.stop()
 
-    # Load terms (semicolon-first)
+    # Safety: if user chose jieba but not installed
+    if match_mode == "jieba_tokens" and jieba is None:
+        st.error("Pasirinkai jieba_tokens, bet 'jieba' nėra įdiegtas. Įrašyk jieba į requirements.txt ir redeploy.")
+        st.stop()
+
+    # Load terms
     terms_cn_rows = load_csv_any(cn_terms_file)
     terms_cn = load_terms_cn_v2(terms_cn_rows)
 
@@ -403,10 +447,12 @@ try:
     # Ingest docs
     docs_cn = ingest_cn_docs(cn_files)
 
-    # Analyze
-    per_doc_concept_term_counts, per_doc_concept_total = analyze_cn_docs_termlevel(docs_cn, terms_cn)
+    # Analyze with chosen matching
+    per_doc_concept_term_counts, per_doc_concept_total = analyze_cn_docs_termlevel(
+        docs_cn, terms_cn, match_mode=match_mode
+    )
 
-    # Tabs per document
+    # Tabs per doc
     st.subheader("Dokumentų analizė po vieną (CN)")
 
     tab_labels = []
@@ -415,7 +461,6 @@ try:
         tab_labels.append(f"{y} | {d.docid}")
     tabs = st.tabs(tab_labels)
 
-    # Collect global summary
     all_docs_rows: List[dict] = []
 
     for d, tab in zip(docs_cn, tabs):
@@ -428,6 +473,7 @@ try:
                 "Kalba": "CN (简体)",
                 "CH pavadinimas (iš failo vardo)": infer_ch_title_from_filename(d.filename),
                 "Pilnas failo vardas": d.filename,
+                "Matching režimas": match_mode,
             })
 
             st.markdown("### Raktažodžių (concept) lentelė")
@@ -456,7 +502,6 @@ try:
                     mime="text/csv"
                 )
 
-            # Add to global summary
             for r in rows:
                 all_docs_rows.append({
                     "year": d.year,
@@ -470,9 +515,9 @@ try:
                     "category": r["category"],
                     "count": r["count"],
                     "CH term variants": r["CH term variants"],
+                    "match_mode": match_mode,
                 })
 
-    # Global summary
     st.divider()
     st.subheader("Bendra suvestinė (visi CN dokumentai)")
 
@@ -491,7 +536,9 @@ try:
             "⬇️ Atsisiųsti visų dokumentų suvestinę (CSV)",
             data=to_csv_bytes(
                 all_docs_rows,
-                ["year", "order_in_year", "docid", "filename", "CH term", "pinyin", "translation", "concept", "category", "count", "CH term variants"]
+                ["year", "order_in_year", "docid", "filename",
+                 "CH term", "pinyin", "translation", "concept", "category", "count", "CH term variants",
+                 "match_mode"]
             ),
             file_name="all_documents_concept_profile.csv",
             mime="text/csv"
@@ -499,7 +546,7 @@ try:
     else:
         st.info("Nėra duomenų suvestinei.")
 
-    st.success("V1.0 atnaujinta ✅ (terms_cn v2)")
+    st.success("Baigta ✅ (jieba matching paruoštas)")
 
 except Exception as e:
     st.error(f"Klaida: {e}")
