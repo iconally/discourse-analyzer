@@ -346,6 +346,35 @@ for tab, (info, text) in zip(tabs, docs_data):
 
         st.divider()
 
+                # Optional small stats
+        with st.expander("Teksto statistika", expanded=False):
+            st.write(
+                {
+                    "Characters": len(text),
+                    "Lines": text.count("\n") + 1 if text else 0,
+                }
+            )
+
+        st.divider()
+
+        # -----------------------------
+        # Analysis
+        # -----------------------------
+        st.subheader("Analizė")
+
+        term_hits = analyze_text(text, terms_df)
+
+        total_hits = int(term_hits["Count"].sum()) if not term_hits.empty else 0
+        unique_terms = int(term_hits["CH term"].nunique()) if not term_hits.empty else 0
+        unique_concepts = int(term_hits["Concept"].nunique()) if not term_hits.empty else 0
+        unique_categories = int(term_hits["Category"].nunique()) if not term_hits.empty else 0
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total matches", total_hits)
+        m2.metric("Unique terms", unique_terms)
+        m3.metric("Unique concepts", unique_concepts)
+        m4.metric("Categories hit", unique_categories)
+
         # 1) Term detail
         st.subheader("1) Term detail")
         if hits.empty:
