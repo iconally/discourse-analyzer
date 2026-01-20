@@ -14,7 +14,7 @@ except Exception:
 
 
 st.set_page_config(
-    page_title="Discourse Analyzer (CN 简体 ↔ EN) — v1.0",
+    page_title="Discourse Analyzer (CN 简体 ↔ EN) — v1.0 (terms_cn v2)",
     layout="wide"
 )
 
@@ -31,9 +31,11 @@ ORDER_RE = re.compile(r"(20[0-2]\d)[_\-\.](\d{1,2})(?=[_\-\.])")
 # Models
 # =========================
 @dataclass
-class Term:
+class TermCN:
     concept: str
     term: str
+    pinyin: str
+    translation: str
     category: str
 
 
@@ -91,9 +93,8 @@ def detect_docid_cn(filename: str) -> Optional[str]:
 
 def infer_ch_title_from_filename(filename: str) -> str:
     """
-    Tries to create a human-friendly CN doc title from filename by removing:
-    - year
-    - order
+    Human-friendly title from filename by removing:
+    - year / order
     - docid
     - _CN
     - extension
@@ -107,37 +108,49 @@ def infer_ch_title_from_filename(filename: str) -> str:
     base = re.sub(r"^(20[0-2]\d)[_\-\.](\d{1,2})[_\-\.]", "", base)
     base = re.sub(r"^(20[0-2]\d)[_\-\.]", "", base)
 
-    # remove docid token if it appears as a standalone underscore-separated chunk
-    # Example: 2020_01_DOC123_CN -> DOC123 removed
-    base = re.sub(r"(?:^|_)([A-Za-z0-9\-]+)$", r"\1", base)  # no-op safety
-    base = re.sub(r"(?:^|_)([A-Za-z0-9\-]+)(?=_|$)", lambda m: m.group(0), base)
-
-    # If we can detect docid, remove it
+    # remove docid if detectable
     docid = detect_docid_cn(filename)
     if docid:
         base = re.sub(rf"(?:^|_){re.escape(docid)}(?:_|$)", "_", base)
 
-    # cleanup underscores/dashes
     base = base.replace("__", "_").strip("_- .")
     base = re.sub(r"[_\-\.]+", " ", base).strip()
     return base
 
 
 # =========================
-# CSV helpers (no pandas)
+# CSV helpers (semicolon-first)
 # =========================
-def load_csv(uploaded_file) -> List[dict]:
+def sniff_delimiter(text: str) -> str:
+    """
+    Prefer ';' for your use-case, but try to sniff.
+    """
+    sample = text[:4096]
+    # Strong preference: if semicolons exist in header, use ';'
+    header_line = sample.splitlines()[0] if sample.splitlines() else ""
+    if header_line.count(";") >= 2:
+        return ";"
+    if "\t" in header_line and header_line.count("\t") >= 2:
+        return "\t"
+    if header_line.count(",") >= 2 and ";" not in header_line:
+        return ","
+    # fallback
+    return ";"
+
+
+def load_csv_any(uploaded_file) -> List[dict]:
     content = uploaded_file.getvalue().decode("utf-8-sig", errors="replace")
-    reader = csv.DictReader(io.StringIO(content))
+    delim = sniff_delimiter(content)
+    reader = csv.DictReader(io.StringIO(content), delimiter=delim)
     rows = []
     for r in reader:
         rows.append({(k or "").strip().lower(): (v or "").strip() for k, v in r.items()})
     return rows
 
 
-def to_csv_bytes(rows: List[dict], fieldnames: List[str]) -> bytes:
+def to_csv_bytes(rows: List[dict], fieldnames: List[str], delimiter: str = ",") -> bytes:
     out = io.StringIO()
-    w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
+    w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore", delimiter=delimiter)
     w.writeheader()
     for r in rows:
         w.writerow(r)
@@ -145,67 +158,64 @@ def to_csv_bytes(rows: List[dict], fieldnames: List[str]) -> bytes:
 
 
 # =========================
-# Terms loading
+# Terms loading (terms_cn v2)
 # =========================
-def load_terms(rows: List[dict], lang: str) -> List[Term]:
-    required = {"concept", "term", "category"}
+def load_terms_cn_v2(rows: List[dict]) -> List[TermCN]:
+    required = {"concept", "term", "pinyin", "translation", "category"}
     if not rows:
-        raise ValueError(f"{lang} terms CSV tuščias.")
+        raise ValueError("terms_cn.csv yra tuščias.")
     missing = required - set(rows[0].keys())
     if missing:
-        raise ValueError(f"{lang} terms CSV trūksta stulpelių: {', '.join(sorted(missing))}")
-    out: List[Term] = []
+        raise ValueError(
+            "terms_cn.csv trūksta stulpelių: " + ", ".join(sorted(missing)) +
+            "\nReikia: concept; term; pinyin; translation; category"
+        )
+
+    out: List[TermCN] = []
     for r in rows:
-        c = r.get("concept", "").strip()
-        t = r.get("term", "").strip()
-        cat = r.get("category", "").strip()
-        if c and t:
-            out.append(Term(concept=c, term=t, category=cat))
+        concept = r.get("concept", "").strip()
+        term = r.get("term", "").strip()
+        pinyin = r.get("pinyin", "").strip()
+        translation = r.get("translation", "").strip()
+        category = r.get("category", "").strip()
+        if concept and term:
+            out.append(TermCN(concept=concept, term=term, pinyin=pinyin, translation=translation, category=category))
+    if not out:
+        raise ValueError("terms_cn.csv neturi nė vienos eilutės su concept ir term.")
     return out
 
 
-def build_cn_patterns(terms_cn: List[Term]) -> Dict[Tuple[str, str], re.Pattern]:
+def build_cn_patterns(terms_cn: List[TermCN]) -> Dict[Tuple[str, str], re.Pattern]:
     """
     Exact substring match for CN (no segmentation).
     """
     return {(t.concept, t.term): re.compile(re.escape(t.term)) for t in terms_cn}
 
 
-def build_concept_maps(terms_cn: List[Term], terms_en: List[Term]) -> Tuple[
-    Dict[str, List[str]], Dict[str, str], Dict[str, str], Dict[str, str]
+def build_concept_maps_cn(terms_cn: List[TermCN]) -> Tuple[
+    Dict[str, List[TermCN]],     # concept -> list of variants (TermCN)
+    Dict[str, str],              # concept -> category
 ]:
-    """
-    Returns:
-    - concept_to_cn_variants: concept -> [CN term variants...]
-    - concept_to_cn_primary: concept -> first CN term (label fallback)
-    - concept_to_category: concept -> first category
-    - concept_to_en_label: concept -> first EN term (label)
-    """
-    concept_to_cn_variants: Dict[str, List[str]] = defaultdict(list)
-    concept_to_cn_primary: Dict[str, str] = {}
+    concept_to_variants: Dict[str, List[TermCN]] = defaultdict(list)
     concept_to_category: Dict[str, str] = {}
-    concept_to_en_label: Dict[str, str] = {}
 
     for t in terms_cn:
-        concept_to_cn_variants[t.concept].append(t.term)
-        if t.concept not in concept_to_cn_primary:
-            concept_to_cn_primary[t.concept] = t.term
+        concept_to_variants[t.concept].append(t)
         if t.concept not in concept_to_category:
             concept_to_category[t.concept] = t.category
 
-    for t in terms_en:
-        if t.concept not in concept_to_en_label and t.term:
-            concept_to_en_label[t.concept] = t.term
+    # de-duplicate variants by term (preserve first occurrence)
+    for c, lst in list(concept_to_variants.items()):
+        seen_terms = set()
+        uniq = []
+        for item in lst:
+            if item.term in seen_terms:
+                continue
+            seen_terms.add(item.term)
+            uniq.append(item)
+        concept_to_variants[c] = uniq
 
-    # de-duplicate variants, preserve order
-    for c, lst in list(concept_to_cn_variants.items()):
-        seen = []
-        for x in lst:
-            if x not in seen:
-                seen.append(x)
-        concept_to_cn_variants[c] = seen
-
-    return concept_to_cn_variants, concept_to_cn_primary, concept_to_category, concept_to_en_label
+    return concept_to_variants, concept_to_category
 
 
 # =========================
@@ -242,14 +252,14 @@ def ingest_cn_docs(files) -> List[Doc]:
 
 
 # =========================
-# Analysis core
+# Analysis core (term-level, then concept-level totals)
 # =========================
 def analyze_cn_docs_termlevel(
     docs: List[Doc],
-    terms_cn: List[Term],
+    terms_cn: List[TermCN],
 ) -> Tuple[
-    Dict[str, Dict[str, Counter]],   # per_doc_concept_term_counts: docid -> concept -> Counter(term -> count)
-    Dict[str, Dict[str, int]]        # per_doc_concept_total: docid -> concept -> total_count
+    Dict[str, Dict[str, Counter]],   # docid -> concept -> Counter(term -> count)
+    Dict[str, Dict[str, int]]        # docid -> concept -> total_count
 ]:
     patterns = build_cn_patterns(terms_cn)
 
@@ -272,41 +282,68 @@ def build_doc_table_rows(
     all_concepts: List[str],
     per_doc_concept_term_counts: Dict[str, Dict[str, Counter]],
     per_doc_concept_total: Dict[str, Dict[str, int]],
-    concept_to_cn_variants: Dict[str, List[str]],
-    concept_to_cn_primary: Dict[str, str],
+    concept_to_variants: Dict[str, List[TermCN]],
     concept_to_category: Dict[str, str],
-    concept_to_en_label: Dict[str, str],
     show_zero: bool
 ) -> List[dict]:
     """
-    Creates the per-document table with required columns:
-    CH term | vertimas ENG | concept | category | count | CH term variants
+    Per-document table columns:
+    CH term | pinyin | translation | concept | category | count | CH term variants
     """
     rows: List[dict] = []
     docid = doc.docid
     concept_totals = per_doc_concept_total.get(docid, {})
     concept_terms = per_doc_concept_term_counts.get(docid, {})
 
+    # helper: find TermCN by (concept, term)
+    variant_lookup: Dict[Tuple[str, str], TermCN] = {}
+    for c, lst in concept_to_variants.items():
+        for v in lst:
+            variant_lookup[(c, v.term)] = v
+
     for concept in all_concepts:
         total = int(concept_totals.get(concept, 0))
         if (not show_zero) and total == 0:
             continue
 
-        # Dominant CH term in THIS document:
-        # - if doc has counts for variants, pick most_common
-        # - else fallback to primary CN label
-        dominant = concept_to_cn_primary.get(concept, "")
+        # Dominant CN term in this doc
+        dominant_term = ""
+        dominant_pinyin = ""
+        dominant_translation = ""
+
         ctr = concept_terms.get(concept)
-        if ctr:
-            dominant = ctr.most_common(1)[0][0]
+        if ctr and len(ctr) > 0:
+            dominant_term = ctr.most_common(1)[0][0]
+            v = variant_lookup.get((concept, dominant_term))
+            if v:
+                dominant_pinyin = v.pinyin
+                dominant_translation = v.translation
+        else:
+            # fallback to first variant in dictionary
+            variants = concept_to_variants.get(concept, [])
+            if variants:
+                dominant_term = variants[0].term
+                dominant_pinyin = variants[0].pinyin
+                dominant_translation = variants[0].translation
+
+        # variants display: term (pinyin) – translation
+        variants_disp = []
+        for v in concept_to_variants.get(concept, []):
+            part = v.term
+            if v.pinyin:
+                part += f" ({v.pinyin})"
+            if v.translation:
+                part += f" – {v.translation}"
+            variants_disp.append(part)
 
         rows.append({
-            "CH term": dominant,
-            "vertimas ENG": concept_to_en_label.get(concept, ""),
+            "CH term": dominant_term,
+            "pinyin": dominant_pinyin,
+            "translation": dominant_translation,
             "concept": concept,
             "category": concept_to_category.get(concept, ""),
             "count": total,
-            "CH term variants": " / ".join(concept_to_cn_variants.get(concept, [])),
+            "CH term variants": " / ".join(variants_disp),
         })
 
     rows.sort(key=lambda r: r["count"], reverse=True)
@@ -316,10 +353,11 @@ def build_doc_table_rows(
 # =========================
 # UI
 # =========================
-st.title("Discourse Analyzer (CN 简体 ↔ EN) — v1.0")
+st.title("Discourse Analyzer (CN 简体 ↔ EN) — v1.0 (terms_cn v2)")
 st.caption(
     "V1.0: dokumentai analizuojami po vieną (tab’ai). "
-    "CH term = dominuojantis CN term variantas dokumente; count = concept suma per variants."
+    "terms_cn.csv struktūra: concept; term; pinyin; translation; category (skirtukas ';'). "
+    "CH term = dominuojantis CN term variante dokumente; count = concept suma per variants."
 )
 
 with st.sidebar:
@@ -331,10 +369,12 @@ with st.sidebar:
     )
     st.caption("Rekomenduojamas pavadinimas: 2020_01_DOC123_CN.txt (arba .docx)")
 
-    st.header("2) Žodynai (CSV)")
-    cn_terms_file = st.file_uploader("terms_cn.csv (concept, term, category)", type=["csv"])
-    en_terms_file = st.file_uploader("terms_en.csv (concept, term, category) — ENG vertimams", type=["csv"])
-    st.caption("ENG vertimas lentelėje: pirmas term iš terms_en.csv tam pačiam concept.")
+    st.header("2) Žodynas")
+    cn_terms_file = st.file_uploader(
+        "terms_cn.csv (concept; term; pinyin; translation; category)",
+        type=["csv"]
+    )
+    st.caption("Svarbu: naudok ';' kaip stulpelių skirtuką (nes reikšmėse gali būti ',' ir '/').")
 
     st.header("3) Nustatymai")
     show_zero = st.checkbox("Rodyti ir concept su count=0", value=False)
@@ -353,12 +393,11 @@ try:
         st.warning("Įkelk terms_cn.csv.")
         st.stop()
 
-    # Load terms
-    terms_cn = load_terms(load_csv(cn_terms_file), "CN")
-    terms_en = load_terms(load_csv(en_terms_file), "EN") if en_terms_file else []
+    # Load terms (semicolon-first)
+    terms_cn_rows = load_csv_any(cn_terms_file)
+    terms_cn = load_terms_cn_v2(terms_cn_rows)
 
-    # Maps
-    concept_to_cn_variants, concept_to_cn_primary, concept_to_category, concept_to_en_label = build_concept_maps(terms_cn, terms_en)
+    concept_to_variants, concept_to_category = build_concept_maps_cn(terms_cn)
     all_concepts = sorted(concept_to_category.keys())
 
     # Ingest docs
@@ -376,7 +415,7 @@ try:
         tab_labels.append(f"{y} | {d.docid}")
     tabs = st.tabs(tab_labels)
 
-    # Collect global summary (all docs)
+    # Collect global summary
     all_docs_rows: List[dict] = []
 
     for d, tab in zip(docs_cn, tabs):
@@ -397,15 +436,13 @@ try:
                 all_concepts=all_concepts,
                 per_doc_concept_term_counts=per_doc_concept_term_counts,
                 per_doc_concept_total=per_doc_concept_total,
-                concept_to_cn_variants=concept_to_cn_variants,
-                concept_to_cn_primary=concept_to_cn_primary,
+                concept_to_variants=concept_to_variants,
                 concept_to_category=concept_to_category,
-                concept_to_en_label=concept_to_en_label,
                 show_zero=show_zero
             )
 
             if not rows:
-                st.info("Šiame dokumente nerasta raktažodžių pagal tavo terms_cn.csv (arba visi count=0).")
+                st.info("Šiame dokumente nerasta raktažodžių (arba visi count=0).")
             else:
                 st.dataframe(rows, use_container_width=True)
 
@@ -413,7 +450,7 @@ try:
                     "⬇️ Atsisiųsti šio dokumento lentelę (CSV)",
                     data=to_csv_bytes(
                         rows,
-                        ["CH term", "vertimas ENG", "concept", "category", "count", "CH term variants"]
+                        ["CH term", "pinyin", "translation", "concept", "category", "count", "CH term variants"]
                     ),
                     file_name=f"{d.docid}_concept_table.csv",
                     mime="text/csv"
@@ -427,7 +464,8 @@ try:
                     "docid": d.docid,
                     "filename": d.filename,
                     "CH term": r["CH term"],
-                    "vertimas ENG": r["vertimas ENG"],
+                    "pinyin": r["pinyin"],
+                    "translation": r["translation"],
                     "concept": r["concept"],
                     "category": r["category"],
                     "count": r["count"],
@@ -453,7 +491,7 @@ try:
             "⬇️ Atsisiųsti visų dokumentų suvestinę (CSV)",
             data=to_csv_bytes(
                 all_docs_rows,
-                ["year", "order_in_year", "docid", "filename", "CH term", "vertimas ENG", "concept", "category", "count", "CH term variants"]
+                ["year", "order_in_year", "docid", "filename", "CH term", "pinyin", "translation", "concept", "category", "count", "CH term variants"]
             ),
             file_name="all_documents_concept_profile.csv",
             mime="text/csv"
@@ -461,7 +499,7 @@ try:
     else:
         st.info("Nėra duomenų suvestinei.")
 
-    st.success("V1.0 baigta ✅")
+    st.success("V1.0 atnaujinta ✅ (terms_cn v2)")
 
 except Exception as e:
     st.error(f"Klaida: {e}")
