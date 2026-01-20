@@ -204,15 +204,18 @@ def analyze_docs(docs: List[Doc], terms: List[Term], lang: str) -> List[dict]:
 
 
 def doc_profile_concept(detail_rows: List[dict]) -> List[dict]:
+    """
+    Aggregates counts per doc_key + concept (summing term variants).
+    """
     agg = defaultdict(int)
     cat_by_concept = {}
-    lang_by_doc = {}
 
     for r in detail_rows:
         key = (r["doc_key"], r["lang"], r["year"], r["order_in_year"], r["docid"], r["concept"])
         agg[key] += int(r["count"] or 0)
-        cat_by_concept[r["concept"]] = r.get("category", "")
-        lang_by_doc[(r["doc_key"], r["lang"])] = True
+        # category from CN terms (first seen)
+        if r["concept"] not in cat_by_concept:
+            cat_by_concept[r["concept"]] = r.get("category", "")
 
     out = []
     for (doc_key, lang, year, order_in_year, docid, concept), cnt in agg.items():
@@ -231,9 +234,12 @@ def doc_profile_concept(detail_rows: List[dict]) -> List[dict]:
     return out
 
 
+# ----------------------------
+# Concept label helpers
+# ----------------------------
 def build_concept_to_en_label(en_terms: List[Term]) -> Dict[str, str]:
     """
-    concept -> one English label (first seen term)
+    concept -> one English label (first seen EN term for that concept)
     """
     m = {}
     for t in en_terms:
@@ -241,9 +247,10 @@ def build_concept_to_en_label(en_terms: List[Term]) -> Dict[str, str]:
             m[t.concept] = t.term
     return m
 
+
 def build_concept_to_cn_label(cn_terms: List[Term]) -> Dict[str, str]:
     """
-    concept -> one CN label (first seen term)
+    concept -> one CN label (first seen CN term for that concept)
     """
     m = {}
     for t in cn_terms:
@@ -261,7 +268,6 @@ def build_concept_to_category(cn_terms: List[Term]) -> Dict[str, str]:
         if t.concept not in m:
             m[t.concept] = t.category
     return m
-
 
 
 def build_concept_to_cn_variants(cn_terms: List[Term]) -> Dict[str, str]:
@@ -285,22 +291,24 @@ def build_concept_to_cn_variants(cn_terms: List[Term]) -> Dict[str, str]:
 # ----------------------------
 # UI
 # ----------------------------
-st.title("Discourse Analyzer: analizė po vieną dokumentą (CN 简体, su tab’ais)")
+st.title("Discourse Analyzer: analizė po vieną dokumentą (CN 简体, tab’ai)")
 st.caption(
-    "Įkeli dokumentus visus kartu, bet peržiūri analizę **po vieną**: kiekvienas dokumentas turi savo tab’ą su lentele."
+    "Įkeli dokumentus visus kartu, bet analizė ir peržiūra yra **po vieną dokumentą**: "
+    "kiekvienas dokumentas turi savo tab’ą su metaduomenimis ir raktažodžių lentele."
 )
 
 with st.sidebar:
     st.header("1) Dokumentai")
     cn_files = st.file_uploader("CN originalai (.txt, .docx)", type=["txt", "docx", "doc"], accept_multiple_files=True)
-    en_files = st.file_uploader("EN vertimai (.txt, .docx)", type=["txt", "docx", "doc"], accept_multiple_files=True)
+    st.caption("Failo pavadinime turi būti metai ir DocID, pvz.: 2020_01_DOC123_CN.txt")
 
     st.header("2) Žodynai (CSV)")
     cn_terms_file = st.file_uploader("terms_cn.csv (concept, term, category)", type=["csv"])
-    en_terms_file = st.file_uploader("terms_en.csv (concept, term, category) — EN vertimui stulpelyje", type=["csv"])
+    en_terms_file = st.file_uploader("terms_en.csv (concept, term, category) — ENG vertimui", type=["csv"])
+    st.caption("ENG vertimas stulpelyje bus pirmas term iš terms_en.csv tam pačiam concept.")
 
     st.header("3) Nustatymai")
-    show_zero = st.checkbox("Rodyti 0 (dokumentų tab’uose ir suvestinėse)", value=False)
+    show_zero = st.checkbox("Rodyti ir 0 (lentelėse)", value=False)
 
 run = st.button("▶️ Analizuoti", type="primary")
 
@@ -316,6 +324,7 @@ try:
         st.warning("Įkelk terms_cn.csv.")
         st.stop()
 
+    # Load terms
     cn_terms_rows = load_csv(cn_terms_file)
     cn_terms = load_terms(cn_terms_rows, "CN")
 
@@ -325,8 +334,10 @@ try:
         en_terms_rows = load_csv(en_terms_file)
         en_terms = load_terms(en_terms_rows, "EN")
 
+    # Ingest docs
     cn_docs = sort_docs(ingest_files(cn_files, "CN"))
 
+    # Require docid for each file
     missing_cn = [d.filename for d in cn_docs if not d.docid]
     if missing_cn:
         st.error(
@@ -336,49 +347,43 @@ try:
         )
         st.stop()
 
-    # analysis (CN)
+    # Analyze CN docs with CN terms
     detail_cn = analyze_docs(cn_docs, cn_terms, "CN")
-    # profile by concept (CN)
-    profile_all = doc_profile_concept(detail_cn)
+    profile_cn = doc_profile_concept(detail_cn)
 
+    # Filter zeros if needed
     if not show_zero:
-        profile_all_view = [r for r in profile_all if int(r["count"]) > 0]
+        profile_cn_view = [r for r in profile_cn if int(r["count"]) > 0]
     else:
-        profile_all_view = profile_all
+        profile_cn_view = profile_cn
 
-concept_to_en = build_concept_to_en_label(en_terms) if have_en_terms else {}
-concept_to_cn_variants = build_concept_to_cn_variants(cn_terms)
-concept_to_cn_label = build_concept_to_cn_label(cn_terms)
-concept_to_category = build_concept_to_category(cn_terms)
+    # Build mappings for labels/variants/categories
+    concept_to_en = build_concept_to_en_label(en_terms) if have_en_terms else {}
+    concept_to_cn_label = build_concept_to_cn_label(cn_terms)
+    concept_to_category = build_concept_to_category(cn_terms)
+    concept_to_cn_variants = build_concept_to_cn_variants(cn_terms)
 
-
-    # ----------------------------
-    # MAIN VIEW: Per-document tabs
-    # ----------------------------
-    st.subheader("Dokumentų analizė po vieną (CN)")
-    st.write("Pasirink dokumento tab’ą ir matysi jo metaduomenis + raktažodžių (concept) lentelę.")
-
-    tab_names = []
-    for d in cn_docs:
-        # Tab label: year + docid (trumpa) — kad patogu
-        y = d.year if d.year is not None else "????"
-        did = d.docid or "NOID"
-        tab_names.append(f"{y} | {did}")
-
-    doc_tabs = st.tabs(tab_names)
-
-    # quick index by doc_key -> doc
-    doc_by_key = {make_doc_key(d): d for d in cn_docs}
-
-    # group profile rows by doc_key
+    # Index profile rows by doc_key
     rows_by_doc = defaultdict(list)
-    for r in profile_all_view:
+    for r in profile_cn_view:
         rows_by_doc[r["doc_key"]].append(r)
 
-    # render each doc tab
-    for idx, d in enumerate(cn_docs):
+    st.subheader("Dokumentų analizė po vieną (CN)")
+    st.write("Pasirink dokumento tab’ą — matysi dokumento metaduomenis ir raktažodžių (concept) lentelę.")
+
+    # Create tabs for each doc
+    tab_labels = []
+    for d in cn_docs:
+        y = d.year if d.year is not None else "????"
+        did = d.docid or "NOID"
+        tab_labels.append(f"{y} | {did}")
+
+    doc_tabs = st.tabs(tab_labels)
+
+    # Render each document
+    for i, d in enumerate(cn_docs):
         dk = make_doc_key(d)
-        with doc_tabs[idx]:
+        with doc_tabs[i]:
             st.markdown("### Dokumento informacija")
             st.write({
                 "Metai": d.year,
@@ -386,27 +391,23 @@ concept_to_category = build_concept_to_category(cn_terms)
                 "DocID": d.docid,
                 "Kalba": "CN (简体)",
                 "Pilnas failo vardas": d.filename,
-                "doc_key (vidinis)": dk
             })
 
             st.markdown("### Raktažodžių (concept) lentelė")
             per = rows_by_doc.get(dk, [])
 
-            # enrich with EN label + CN variants
             enriched = []
             for r in per:
                 concept = r["concept"]
-enriched.append({
-    "CH term": concept_to_cn_label.get(concept, ""),
-    "vertimas ENG": concept_to_en.get(concept, ""),
-    "concept": concept,
-    "category": concept_to_category.get(concept, r.get("category", "")),
-    "count": int(r.get("count", 0)),
-    "CH term variants": concept_to_cn_variants.get(concept, ""),
-})
+                enriched.append({
+                    "CH term": concept_to_cn_label.get(concept, ""),
+                    "vertimas ENG": concept_to_en.get(concept, ""),
+                    "concept": concept,
+                    "category": concept_to_category.get(concept, r.get("category", "")),
+                    "count": int(r.get("count", 0)),
+                    "CH term variants": concept_to_cn_variants.get(concept, ""),
+                })
 
-
-            # sort by count desc
             enriched.sort(key=lambda x: x["count"], reverse=True)
 
             if not enriched:
@@ -415,43 +416,47 @@ enriched.append({
                 st.dataframe(enriched, use_container_width=True)
 
                 st.download_button(
-                    "⬇️ Atsisiųsti šio dokumento rezultatus (CSV)",
-                    data=to_csv_bytes(enriched, ["CH term", "vertimas ENG", "concept", "category", "count", "CH term variants"]),
-                    file_name=f"{d.docid}_concept_counts.csv",
+                    "⬇️ Atsisiųsti šio dokumento lentelę (CSV)",
+                    data=to_csv_bytes(
+                        enriched,
+                        ["CH term", "vertimas ENG", "concept", "category", "count", "CH term variants"]
+                    ),
+                    file_name=f"{d.docid}_concept_table.csv",
                     mime="text/csv"
                 )
 
-    # ----------------------------
-    # Optional: global export
-    # ----------------------------
+    # Global summary
     st.divider()
     st.subheader("Bendra suvestinė (visi CN dokumentai)")
-    st.write("Jei reikia — atsisiųsk visų dokumentų concept profilius viename faile.")
+    st.write("Jei reikia, atsisiųsk visų dokumentų rezultatus viename faile.")
 
-    # add EN label + CN variants to all rows
     all_enriched = []
-    for r in profile_all_view:
+    for r in profile_cn_view:
         c = r["concept"]
-all_enriched.append({
-    "doc_key": r["doc_key"],
-    "year": r["year"],
-    "order_in_year": r["order_in_year"],
-    "docid": r["docid"],
-    "CH term": concept_to_cn_label.get(c, ""),
-    "vertimas ENG": concept_to_en.get(c, ""),
-    "concept": c,
-    "category": concept_to_category.get(c, r.get("category", "")),
-    "count": int(r.get("count", 0)),
-    "CH term variants": concept_to_cn_variants.get(c, ""),
-})
+        all_enriched.append({
+            "doc_key": r["doc_key"],
+            "year": r["year"],
+            "order_in_year": r["order_in_year"],
+            "docid": r["docid"],
+            "CH term": concept_to_cn_label.get(c, ""),
+            "vertimas ENG": concept_to_en.get(c, ""),
+            "concept": c,
+            "category": concept_to_category.get(c, r.get("category", "")),
+            "count": int(r.get("count", 0)),
+            "CH term variants": concept_to_cn_variants.get(c, ""),
+        })
 
+    # sort for readability
+    all_enriched.sort(key=lambda x: (x["year"] or 9999, x["order_in_year"] or 9999, x["docid"] or "", -x["count"], x["category"], x["concept"]))
 
     st.dataframe(all_enriched, use_container_width=True)
 
     st.download_button(
         "⬇️ Atsisiųsti visų dokumentų suvestinę (CSV)",
-        data=to_csv_bytes(all_enriched, ["doc_key","year","order_in_year","docid","CH term","vertimas ENG","concept","category","count","CH term variants"]),
-
+        data=to_csv_bytes(
+            all_enriched,
+            ["doc_key", "year", "order_in_year", "docid", "CH term", "vertimas ENG", "concept", "category", "count", "CH term variants"]
+        ),
         file_name="all_documents_concept_profile.csv",
         mime="text/csv"
     )
