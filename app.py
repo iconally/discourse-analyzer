@@ -271,7 +271,7 @@ def parse_meta_from_filename(filename: str) -> Dict[str, str]:
     """
     stem = re.sub(r"\.[^.]+$", "", filename).strip()
 
-    m = re.search(r"\b(19|20)\d{2}\b", stem)
+    m = re.search(r"(?<!\d)(19|20)\d{2}(?!\d)", stem)
     year = m.group(0) if m else ""
 
     title = stem
