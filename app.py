@@ -141,6 +141,43 @@ def count_term_occurrences(text: str, term: str) -> int:
     return len(re.findall(re.escape(term), text))
 
 
+def analyze_text(text: str, terms_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns a term-level results dataframe with columns:
+    term, pinyin, translation, concept, category, count
+    """
+    text = normalize_text(text)
+
+    rows = []
+    # Iterate terms; for large dictionaries you can optimize later, but this is stable.
+    for _, r in terms_df.iterrows():
+        term = safe_str(r["term"])
+        cnt = count_substring_occurrences(text, term)
+        if cnt > 0:
+            rows.append(
+                {
+                    "CH term": term,
+                    "Pinyin": safe_str(r["pinyin"]),
+                    "ENG translation": safe_str(r["translation"]),
+                    "Concept": safe_str(r["concept"]),
+                    "Category": safe_str(r["category"]),
+                    "Count": int(cnt),
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=["CH term", "Pinyin", "ENG translation", "Concept", "Category", "Count"])
+
+    df = pd.DataFrame(rows)
+
+    # Combine duplicates just in case (same term may appear multiple times in csv)
+    df = (
+        df.groupby(["CH term", "Pinyin", "ENG translation", "Concept", "Category"], as_index=False)["Count"]
+        .sum()
+        .sort_values(["Category", "Concept", "Count"], ascending=[True, True, False])
+        .reset_index(drop=True)
+    )
+    return df
 def analyze_document(text: str, terms_df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for _, r in terms_df.iterrows():
