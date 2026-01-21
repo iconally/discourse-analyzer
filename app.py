@@ -266,24 +266,34 @@ def get_file_text(uploaded) -> Tuple[Optional[str], Optional[str]]:
 def parse_meta_from_filename(filename: str) -> Dict[str, str]:
     """
     Auto-extract:
-    - year: first 4-digit year like 2017
-    - title_cn: remaining filename stem after removing year and separators
+    - year: first 4-digit year like 2017/2020
+    - title_cn: cleaned filename stem (no year, no numeric prefix, no CN suffix)
     """
     stem = re.sub(r"\.[^.]+$", "", filename).strip()
 
+    # Year (works with underscores, e.g., 2020_01_xxx)
     m = re.search(r"(?<!\d)(19|20)\d{2}(?!\d)", stem)
     year = m.group(0) if m else ""
 
     title = stem
     if year:
-        title = re.sub(rf"\b{re.escape(year)}\b", "", title)
+        title = re.sub(rf"{re.escape(year)}", "", title)
 
-    # Remove common separators around removed year
+    # Remove separators after year
     title = re.sub(r"^[\s\-_–—:：]+", "", title)
     title = re.sub(r"[\s\-_–—:：]+$", "", title)
+
+    # Remove leading numeric prefixes (01, 02, etc.)
+    title = re.sub(r"^(0?[1-9]|1[0-2])[\s\-_–—:：]+", "", title)
+
+    # ✅ V1.4: remove language suffix like _CN / -CN / space CN
+    title = re.sub(r"[\s\-_–—:：]+CN$", "", title, flags=re.IGNORECASE)
+
+    # Final cleanup
     title = re.sub(r"[\s\-_–—:：]{2,}", " ", title).strip()
 
     return {"year": year, "title_cn": title}
+
 
 
 @dataclass
