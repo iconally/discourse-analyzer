@@ -1,6 +1,7 @@
-# app.py (V1.1)
+# app.py
 import io
 import re
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -38,32 +39,6 @@ def safe_str(x) -> str:
 def normalize_text(text: str) -> str:
     # Minimal normalization: unify newlines and strip
     return text.replace("\r\n", "\n").replace("\r", "\n").strip()
-
-
-def extract_year_from_filename(filename: str) -> str:
-    m = re.search(r"(19|20)\d{2}", filename)
-    return m.group(0) if m else "—"
-
-
-def extract_title_from_filename(filename: str) -> str:
-    # remove extension
-    name = re.sub(r"\.(txt|docx|doc)$", "", filename, flags=re.IGNORECASE)
-
-    # remove leading date-ish prefixes like 2017-07- / 2020_ etc.
-    name = re.sub(r"^(19|20)\d{2}[-_.]?\d{0,2}[-_.]?", "", name)
-
-    # remove trailing language marker
-    name = re.sub(r"[-_.]?CN$", "", name, flags=re.IGNORECASE)
-
-    # cosmetics
-    name = name.replace("_", " ").replace("-", " ").strip()
-    return name if name else filename
-
-
-def df_index_from_1(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    out.index = range(1, len(out) + 1)
-    return out
 
 
 def read_txt(file_bytes: bytes) -> str:
@@ -173,7 +148,7 @@ def analyze_text(text: str, terms_df: pd.DataFrame) -> pd.DataFrame:
     df = (
         df.groupby(["CH term", "Pinyin", "ENG translation", "Concept", "Category"], as_index=False)["Count"]
         .sum()
-        .sort_values(["Count"], ascending=[False])
+        .sort_values(["Category", "Concept", "Count"], ascending=[True, True, False])
         .reset_index(drop=True)
     )
     return df
@@ -217,6 +192,7 @@ def category_summary(term_hits: pd.DataFrame, terms_df: pd.DataFrame) -> pd.Data
     total_all = out["Total count"].sum()
     out["Share"] = out["Total count"].apply(lambda x: (x / total_all) if total_all > 0 else 0.0)
 
+    # Formatting helpers (keep raw numeric too)
     out = out.sort_values(["Total count", "Unique terms"], ascending=[False, False]).reset_index(drop=True)
 
     # Human-readable
@@ -283,6 +259,22 @@ def get_file_text(uploaded) -> Tuple[Optional[str], Optional[str]]:
     return None, "Palaikomi formatai: .txt ir .docx (DOC – konvertuoti į DOCX)."
 
 
+@dataclass
+class DocMeta:
+    year: str = ""
+    title_cn: str = ""
+
+
+def meta_key(filename: str) -> str:
+    return f"doc_meta::{filename}"
+
+
+def ensure_doc_meta(filename: str):
+    k = meta_key(filename)
+    if k not in st.session_state:
+        st.session_state[k] = {"year": "", "title_cn": ""}
+
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -305,6 +297,7 @@ with st.sidebar:
     st.divider()
     st.header("Rodymas / filtrai")
     show_zero_rows = st.checkbox("Rodyti termus su 0 (nerekomenduojama)", value=False, disabled=True)
+    # Paliekam vietą ateičiai (v2): substring vs token
     st.caption("V2 idėja: substring vs token (jieba/pkuseg) — kol kas substring.")
 
 
@@ -354,22 +347,35 @@ tab_names = [fn for fn, _ in docs]
 tabs = st.tabs(tab_names)
 
 for (filename, text), tab in zip(docs, tabs):
+    ensure_doc_meta(filename)
+
     with tab:
         # -----------------------------
         # Document info block
         # -----------------------------
         st.subheader("Document info")
 
-        year = extract_year_from_filename(filename)
-        title_cn = extract_title_from_filename(filename)
-
         col1, col2, col3 = st.columns([1, 2, 2])
         with col1:
-            st.metric("Metai", year)
+            year_val = st.text_input(
+                "Metai (Year)",
+                value=st.session_state[meta_key(filename)]["year"],
+                key=f"year::{filename}",
+                placeholder="pvz. 2017",
+            )
         with col2:
-            st.markdown(f"**Pavadinimas (CN):**  \n{title_cn}")
+            title_cn_val = st.text_input(
+                "Pavadinimas (CN)",
+                value=st.session_state[meta_key(filename)]["title_cn"],
+                key=f"title_cn::{filename}",
+                placeholder="pvz. 新一代人工智能发展规划",
+            )
         with col3:
-            st.markdown(f"**Pilnas failo pavadinimas:**  \n{filename}")
+            st.text_input("Pilnas failo pavadinimas", value=filename, disabled=True)
+
+        # Persist
+        st.session_state[meta_key(filename)]["year"] = year_val
+        st.session_state[meta_key(filename)]["title_cn"] = title_cn_val
 
         # Optional small stats
         with st.expander("Teksto statistika", expanded=False):
@@ -400,14 +406,20 @@ for (filename, text), tab in zip(docs, tabs):
         m3.metric("Unique concepts", unique_concepts)
         m4.metric("Categories hit", unique_categories)
 
+        # Prepare summaries (needed also for downloads below)
+        cat_sum = category_summary(term_hits, terms_df)
+        conc_sum = concept_summary(term_hits)
+
         # -----------------------------
-        # 1) Term detail (first)
+        # Term detail (FIRST) + sorting by Count desc + index from 1
         # -----------------------------
         st.markdown("### 1) Term detail")
         if term_hits.empty:
             st.info("Nėra termų detalių (nes nėra hitų).")
         else:
-            st.dataframe(df_index_from_1(term_hits), width="stretch")
+            term_hits_view = term_hits.sort_values(["Count"], ascending=[False]).reset_index(drop=True)
+            term_hits_view.index = range(1, len(term_hits_view) + 1)
+            st.dataframe(term_hits_view, width="stretch")
 
             # Downloads
             cdl1, cdl2 = st.columns(2)
@@ -419,50 +431,43 @@ for (filename, text), tab in zip(docs, tabs):
                     mime="text/csv",
                 )
             with cdl2:
+                # Build a single CSV with category+concept summary for convenience
+                summary_pack = {
+                    "category_summary": cat_sum,
+                    "concept_summary": conc_sum,
+                }
+                # Write a simple multi-section CSV
+                out = io.StringIO()
+                out.write("=== CATEGORY SUMMARY ===\n")
+                cat_sum.to_csv(out, index=False)
+                out.write("\n=== CONCEPT SUMMARY ===\n")
+                conc_sum.to_csv(out, index=False)
+
                 st.download_button(
                     "Download summaries (CSV)",
-                    data=b"",  # placeholder; real data is built below after summaries exist
+                    data=out.getvalue().encode("utf-8-sig"),
                     file_name=f"{filename}_summaries.csv",
                     mime="text/csv",
-                    disabled=True,
                 )
 
         # -----------------------------
-        # 2) Concept summary
+        # Concept summary (SECOND) + sorting by Total count desc + index from 1
         # -----------------------------
         st.markdown("### 2) Concept summary")
-        conc_sum = concept_summary(term_hits)
         if conc_sum.empty:
             st.info("Nėra concept rezultatų (nes nėra termų).")
         else:
-            st.dataframe(df_index_from_1(conc_sum), width="stretch")
+            conc_sum_view = conc_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
+            conc_sum_view.index = range(1, len(conc_sum_view) + 1)
+            st.dataframe(conc_sum_view, width="stretch")
 
         # -----------------------------
-        # 3) Category summary (last)
+        # Category summary (THIRD) + sorting by Total count desc + index from 1
         # -----------------------------
         st.markdown("### 3) Category summary")
-        cat_sum = category_summary(term_hits, terms_df)
-
         if cat_sum.empty:
             st.info("Šiame dokumente nerasta nė vieno termino iš žodyno.")
         else:
-            st.dataframe(df_index_from_1(cat_sum), width="stretch")
-
-        # -----------------------------
-        # Downloads (enabled only when we have dataframes)
-        # -----------------------------
-        if not term_hits.empty:
-            out = io.StringIO()
-            out.write("=== CATEGORY SUMMARY ===\n")
-            cat_sum.to_csv(out, index=False)
-            out.write("\n=== CONCEPT SUMMARY ===\n")
-            conc_sum.to_csv(out, index=False)
-
-            # Re-render the 2nd download button in the same place is not possible,
-            # so we place an enabled one here (no other UI changes).
-            st.download_button(
-                "Download summaries (CSV)",
-                data=out.getvalue().encode("utf-8-sig"),
-                file_name=f"{filename}_summaries.csv",
-                mime="text/csv",
-            )
+            cat_sum_view = cat_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
+            cat_sum_view.index = range(1, len(cat_sum_view) + 1)
+            st.dataframe(cat_sum_view, width="stretch")
