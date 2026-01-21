@@ -1,4 +1,6 @@
 # app.py
+# Version: V1.3
+
 import io
 import re
 from dataclasses import dataclass
@@ -17,6 +19,8 @@ except Exception:
 # -----------------------------
 # Config
 # -----------------------------
+APP_VERSION = "V1.3"
+
 st.set_page_config(
     page_title="Discourse Analyzer",
     layout="wide",
@@ -259,6 +263,29 @@ def get_file_text(uploaded) -> Tuple[Optional[str], Optional[str]]:
     return None, "Palaikomi formatai: .txt ir .docx (DOC – konvertuoti į DOCX)."
 
 
+def parse_meta_from_filename(filename: str) -> Dict[str, str]:
+    """
+    Auto-extract:
+    - year: first 4-digit year like 2017
+    - title_cn: remaining filename stem after removing year and separators
+    """
+    stem = re.sub(r"\.[^.]+$", "", filename).strip()
+
+    m = re.search(r"\b(19|20)\d{2}\b", stem)
+    year = m.group(0) if m else ""
+
+    title = stem
+    if year:
+        title = re.sub(rf"\b{re.escape(year)}\b", "", title)
+
+    # Remove common separators around removed year
+    title = re.sub(r"^[\s\-_–—:：]+", "", title)
+    title = re.sub(r"[\s\-_–—:：]+$", "", title)
+    title = re.sub(r"[\s\-_–—:：]{2,}", " ", title).strip()
+
+    return {"year": year, "title_cn": title}
+
+
 @dataclass
 class DocMeta:
     year: str = ""
@@ -278,7 +305,7 @@ def ensure_doc_meta(filename: str):
 # -----------------------------
 # UI
 # -----------------------------
-st.title("Discourse Analyzer (CN religious-coded terms)")
+st.title(f"Discourse Analyzer (CN religious-coded terms) — {APP_VERSION}")
 
 with st.sidebar:
     st.header("Žodynas (terms_cn.csv)")
@@ -293,12 +320,6 @@ with st.sidebar:
         accept_multiple_files=True,
     )
     st.caption("DOC rekomenduojama konvertuoti į DOCX arba TXT.")
-
-    st.divider()
-    st.header("Rodymas / filtrai")
-    show_zero_rows = st.checkbox("Rodyti termus su 0 (nerekomenduojama)", value=False, disabled=True)
-    # Paliekam vietą ateičiai (v2): substring vs token
-    st.caption("V2 idėja: substring vs token (jieba/pkuseg) — kol kas substring.")
 
 
 # Load dictionary
@@ -355,27 +376,19 @@ for (filename, text), tab in zip(docs, tabs):
         # -----------------------------
         st.subheader("Document info")
 
-        col1, col2, col3 = st.columns([1, 2, 2])
-        with col1:
-            year_val = st.text_input(
-                "Metai (Year)",
-                value=st.session_state[meta_key(filename)]["year"],
-                key=f"year::{filename}",
-                placeholder="pvz. 2017",
-            )
-        with col2:
-            title_cn_val = st.text_input(
-                "Pavadinimas (CN)",
-                value=st.session_state[meta_key(filename)]["title_cn"],
-                key=f"title_cn::{filename}",
-                placeholder="pvz. 新一代人工智能发展规划",
-            )
-        with col3:
-            st.text_input("Pilnas failo pavadinimas", value=filename, disabled=True)
+        inferred = parse_meta_from_filename(filename)
 
-        # Persist
-        st.session_state[meta_key(filename)]["year"] = year_val
-        st.session_state[meta_key(filename)]["title_cn"] = title_cn_val
+        # Auto-fill (only if empty)
+        if not st.session_state[meta_key(filename)]["year"]:
+            st.session_state[meta_key(filename)]["year"] = inferred["year"]
+        if not st.session_state[meta_key(filename)]["title_cn"]:
+            st.session_state[meta_key(filename)]["title_cn"] = inferred["title_cn"]
+
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            st.write(f"**Metai (Year):** {st.session_state[meta_key(filename)]['year']}")
+        with col2:
+            st.write(f"**Pavadinimas (CN):** {st.session_state[meta_key(filename)]['title_cn']}")
 
         # Optional small stats
         with st.expander("Teksto statistika", expanded=False):
@@ -421,7 +434,35 @@ for (filename, text), tab in zip(docs, tabs):
             term_hits_view.index = range(1, len(term_hits_view) + 1)
             st.dataframe(term_hits_view, width="stretch")
 
-            # Downloads
+        # -----------------------------
+        # Concept summary (SECOND) + sorting by Total count desc + index from 1
+        # -----------------------------
+        st.markdown("### 2) Concept summary")
+        if conc_sum.empty:
+            st.info("Nėra concept rezultatų (nes nėra termų).")
+        else:
+            conc_sum_view = conc_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
+            conc_sum_view.index = range(1, len(conc_sum_view) + 1)
+            st.dataframe(conc_sum_view, width="stretch")
+
+        # -----------------------------
+        # Category summary (THIRD) + sorting by Total count desc + index from 1
+        # -----------------------------
+        st.markdown("### 3) Category summary")
+        if cat_sum.empty:
+            st.info("Šiame dokumente nerasta nė vieno termino iš žodyno.")
+        else:
+            cat_sum_view = cat_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
+            cat_sum_view.index = range(1, len(cat_sum_view) + 1)
+            st.dataframe(cat_sum_view, width="stretch")
+
+        # -----------------------------
+        # Downloads (BOTTOM)
+        # -----------------------------
+        if not term_hits.empty:
+            st.divider()
+            st.subheader("Downloads")
+
             cdl1, cdl2 = st.columns(2)
             with cdl1:
                 st.download_button(
@@ -449,25 +490,3 @@ for (filename, text), tab in zip(docs, tabs):
                     file_name=f"{filename}_summaries.csv",
                     mime="text/csv",
                 )
-
-        # -----------------------------
-        # Concept summary (SECOND) + sorting by Total count desc + index from 1
-        # -----------------------------
-        st.markdown("### 2) Concept summary")
-        if conc_sum.empty:
-            st.info("Nėra concept rezultatų (nes nėra termų).")
-        else:
-            conc_sum_view = conc_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
-            conc_sum_view.index = range(1, len(conc_sum_view) + 1)
-            st.dataframe(conc_sum_view, width="stretch")
-
-        # -----------------------------
-        # Category summary (THIRD) + sorting by Total count desc + index from 1
-        # -----------------------------
-        st.markdown("### 3) Category summary")
-        if cat_sum.empty:
-            st.info("Šiame dokumente nerasta nė vieno termino iš žodyno.")
-        else:
-            cat_sum_view = cat_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
-            cat_sum_view.index = range(1, len(cat_sum_view) + 1)
-            st.dataframe(cat_sum_view, width="stretch")
