@@ -406,35 +406,20 @@ for (filename, text), tab in zip(docs, tabs):
         m3.metric("Unique concepts", unique_concepts)
         m4.metric("Categories hit", unique_categories)
 
-        # -----------------------------
-        # Category summary (with coverage + share)
-        # -----------------------------
-        st.markdown("### 1) Category summary")
+        # Prepare summaries (needed also for downloads below)
         cat_sum = category_summary(term_hits, terms_df)
-
-        if cat_sum.empty:
-            st.info("Šiame dokumente nerasta nė vieno termino iš žodyno.")
-        else:
-            st.dataframe(cat_sum, width="stretch")
-
-        # -----------------------------
-        # Concept summary
-        # -----------------------------
-        st.markdown("### 2) Concept summary")
         conc_sum = concept_summary(term_hits)
-        if conc_sum.empty:
-            st.info("Nėra concept rezultatų (nes nėra termų).")
-        else:
-            st.dataframe(conc_sum, width="stretch")
 
         # -----------------------------
-        # Term detail
+        # Term detail (FIRST) + sorting by Count desc + index from 1
         # -----------------------------
-        st.markdown("### 3) Term detail")
+        st.markdown("### 1) Term detail")
         if term_hits.empty:
             st.info("Nėra termų detalių (nes nėra hitų).")
         else:
-            st.dataframe(term_hits, width="stretch")
+            term_hits_view = term_hits.sort_values(["Count"], ascending=[False]).reset_index(drop=True)
+            term_hits_view.index = range(1, len(term_hits_view) + 1)
+            st.dataframe(term_hits_view, width="stretch")
 
             # Downloads
             cdl1, cdl2 = st.columns(2)
@@ -464,3 +449,25 @@ for (filename, text), tab in zip(docs, tabs):
                     file_name=f"{filename}_summaries.csv",
                     mime="text/csv",
                 )
+
+        # -----------------------------
+        # Concept summary (SECOND) + sorting by Total count desc + index from 1
+        # -----------------------------
+        st.markdown("### 2) Concept summary")
+        if conc_sum.empty:
+            st.info("Nėra concept rezultatų (nes nėra termų).")
+        else:
+            conc_sum_view = conc_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
+            conc_sum_view.index = range(1, len(conc_sum_view) + 1)
+            st.dataframe(conc_sum_view, width="stretch")
+
+        # -----------------------------
+        # Category summary (THIRD) + sorting by Total count desc + index from 1
+        # -----------------------------
+        st.markdown("### 3) Category summary")
+        if cat_sum.empty:
+            st.info("Šiame dokumente nerasta nė vieno termino iš žodyno.")
+        else:
+            cat_sum_view = cat_sum.sort_values(["Total count"], ascending=[False]).reset_index(drop=True)
+            cat_sum_view.index = range(1, len(cat_sum_view) + 1)
+            st.dataframe(cat_sum_view, width="stretch")
