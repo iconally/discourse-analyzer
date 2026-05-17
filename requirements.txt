@@ -3,6 +3,7 @@ matplotlib>=3.7
 python-docx>=1.1.2
 jieba>=0.42.1
 numpy
-hanlp>=2.2.0  # optional, for HanLP mode. HanLP gali reikalauti: pip install tensorflow arba pip install torch
-thulac>=0.2.2  # optional, for THULAC mode
-
+pandas
+# HanLP on PyPI tops at 2.1.x; app falls back to substring if import/load fails
+hanlp>=2.1.0,<2.2.0
+thulac>=0.2.2
