@@ -1,0 +1,37 @@
+# Virtual environments
+venv/
+venv310/
+venv311/
+venv312/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Secrets / local env
+.env
+.streamlit/secrets.toml
+
+# Batch / smoke outputs (local only)
+batch_out*/
+economist_D_Xi*/
+economist_batch*/
+economist_from2017*/
+economist_*_out*/
+
+# Large local corpora (upload in UI or use your own disk path)
+Xi Speeches/
+
+# Temp / check artifacts
+*.tmp.csv
+check_*_result.txt

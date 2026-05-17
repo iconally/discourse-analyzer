@@ -1,0 +1,140 @@
+id;year;date_start;date_end;title;category
+1;2017;2017-01-17;2017-01-17;Xi Jinping speech at the World Economic Forum in Davos;Diplomacy
+2;2017;2017-01-06;2017-01-06;Seventh Plenum of the 18th Central Commission for Discipline Inspection (CCDI);Domestic politics
+3;2017;2017-02-10;2017-02-10;Xi Jinping meets US Secretary of State Rex Tillerson in Beijing;Diplomacy
+4;2017;2017-03-05;2017-03-15;National People's Congress annual session;Domestic politics
+5;2017;2017-03-15;2017-03-15;Adoption of the General Provisions of the Civil Law of the PRC;Law
+6;2017;2017-04-06;2017-04-07;Xi–Trump summit at Mar-a-Lago;Diplomacy
+7;2017;2017-04-26;2017-04-26;Launch of China’s first domestically built aircraft carrier (Type 001A);Security
+8;2017;2017-05-14;2017-05-15;Belt and Road Forum for International Cooperation (Beijing);BRI
+9;2017;2017-06-01;2017-06-01;Cybersecurity Law of the PRC enters into force;Law
+10;2017;2017-06-09;2017-06-09;Shanghai Cooperation Organization summit in Astana;Diplomacy
+11;2017;2017-06-16;2017-06-16;Xi Jinping visit to Kazakhstan during SCO summit;Diplomacy
+12;2017;2017-07-30;2017-07-30;PLA 90th anniversary military parade at Zhurihe training base;Security
+13;2017;2017-06;2017-08;Doklam standoff between China and India;Security
+14;2017;2017-07-15;2017-07-15;National Financial Work Conference in Beijing;Economy
+15;2017;2017-09-03;2017-09-05;BRICS Summit in Xiamen;BRICS
+16;2017;2017-10-18;2017-10-24;19th Communist Party Congress;Domestic politics
+17;2017;2017-11-08;2017-11-10;Donald Trump state visit to China;Diplomacy
+18;2017;2017-12-18;2017-12-20;Central Economic Work Conference;Economy
+19;2017;2017-12-01;2017-12-01;China launches Dark Matter Particle Explorer results announcement;Technology
+20;2017;2017-12-03;2017-12-03;Fourth World Internet Conference in Wuzhen;Technology / Internet governance
+21;2018;2018-01-22;2018-01-22;Central Political-Legal Work Conference Beijing;Domestic politics
+22;2018;2018-01-12;2018-01-12;Launch of BeiDou-3 satellites (navigation system expansion);Technology
+23;2018;2018-01-05;2018-01-05;China releases 2018 AI development roadmap;Technology
+24;2018;2018-03-11;2018-03-11;Constitutional amendment abolishing presidential term limits;Law
+25;2018;2018-03-17;2018-03-17;Xi Jinping re-elected President of China;Domestic politics
+26;2018;2018-04-27;2018-04-28;Xi–Modi Wuhan informal summit;Diplomacy
+27;2018;2018-04-16;2018-04-16;United States imposes sanctions on ZTE;Technology
+28;2018;2018-06-09;2018-06-10;Shanghai Cooperation Organization summit Qingdao;Diplomacy
+29;2018;2018-07-06;2018-07-06;Start of US-China trade war tariffs;Economy
+30;2018;2018-08-27;2018-08-27;China–Malaysia renegotiation of Belt and Road railway projects;BRI
+31;2018;2018-09-03;2018-09-04;FOCAC Beijing Summit;Diplomacy
+32;2018;2018-10-23;2018-10-23;Opening of Hong Kong–Zhuhai–Macau Bridge;Infrastructure
+33;2018;2018-10-31;2018-10-31;Launch of new national AI innovation pilot zones;Technology
+34;2018;2018-11-05;2018-11-10;First China International Import Expo Shanghai;Economy
+35;2018;2018-12-18;2018-12-18;40th anniversary of Reform and Opening-up speech by Xi;Society
+36;2019;2019-01-02;2019-01-02;Xi Jinping speech on Taiwan reunification ("Message to Compatriots in Taiwan");Domestic politics
+37;2019;2019-01-03;2019-01-03;Chang’e-4 spacecraft lands on the far side of the Moon;Technology
+38;2019;2019-02-18;2019-02-18;Outline Development Plan for the Guangdong–Hong Kong–Macao Greater Bay Area released;Economy
+39;2019;2019-03-05;2019-03-15;National People's Congress annual session;Domestic politics
+40;2019;2019-04-25;2019-04-27;Second Belt and Road Forum Beijing;BRI
+41;2019;2019-05-16;2019-05-16;United States adds Huawei to Entity List;Technology
+42;2019;2019-06-05;2019-06-05;Xi Jinping state visit to Russia and Xi–Putin summit Moscow;Diplomacy
+43;2019;2019-06-28;2019-06-29;G20 Osaka summit;Diplomacy
+44;2019;2019-06-09;2019-06-09;Mass protests begin in Hong Kong against extradition bill;Society
+45;2019;2019-08-05;2019-08-05;Hong Kong general strike and citywide protests;Society
+46;2019;2019-09-04;2019-09-04;Hong Kong government withdraws extradition bill;Society
+47;2019;2019-09-25;2019-09-25;Beijing Daxing International Airport officially opens;Infrastructure
+48;2019;2019-10-01;2019-10-01;70th anniversary of the PRC military parade Beijing;Society
+49;2019;2019-10-11;2019-10-12;Xi–Modi Chennai informal summit;Diplomacy
+50;2019;2019-11-05;2019-11-10;China International Import Expo Shanghai;Economy
+51;2019;2019-12-10;2019-12-10;Central Economic Work Conference;Economy
+52;2019;2019-12-31;2019-12-31;Wuhan Municipal Health Commission reports pneumonia cluster;Society
+53;2020;2019-12-31;2019-12-31;Wuhan Municipal Health Commission reports pneumonia cluster to WHO;Society
+54;2020;2020-01-23;2020-01-23;Wuhan lockdown begins;Security
+55;2020;2020-02-07;2020-02-07;Death of Dr. Li Wenliang triggers nationwide public reaction;Society
+56;2020;2020-02-24;2020-02-24;National People's Congress postpones annual session;Domestic politics
+57;2020;2020-03-27;2020-03-27;China closes borders to most foreign nationals;Security
+58;2020;2020-05-22;2020-05-28;National People's Congress session;Domestic politics
+59;2020;2020-06-30;2020-06-30;Hong Kong National Security Law enacted;Law
+60;2020;2020-06-15;2020-06-15;Galwan Valley clash China–India border;Security
+61;2020;2020-07-01;2020-07-01;Hong Kong protests and arrests under new security law;Security
+62;2020;2020-08-10;2020-08-10;China sanctions US officials over Hong Kong issues;Diplomacy
+63;2020;2020-09-22;2020-09-22;Xi Jinping speech at UN General Assembly;Diplomacy
+64;2020;2020-10-29;2020-10-29;Fifth Plenum approves 14th Five-Year Plan proposals;Economy
+65;2020;2020-11-15;2020-11-15;Signing of RCEP trade agreement;Economy
+66;2020;2020-12-16;2020-12-18;Central Economic Work Conference;Economy
+67;2021;2021-01-11;2021-01-11;WHO approves Chinese Sinopharm COVID-19 vaccine for global distribution negotiations;Diplomacy
+68;2021;2021-04-29;2021-04-29;Launch of the Tianhe core module of China's Tiangong space station;Technology
+69;2021;2021-03-05;2021-03-11;National People's Congress annual session;Domestic politics
+70;2021;2021-04-13;2021-04-13;Hainan Free Trade Port special policies implemented;Economy
+71;2021;2021-05-15;2021-05-15;Tianwen-1 Zhurong Mars rover successfully lands on Mars;Technology
+72;2021;2021-07-01;2021-07-01;CCP 100th anniversary ceremony in Beijing;Domestic politics
+73;2021;2021-06-28;2021-06-28;Xi–Putin virtual summit marking 20 years of the China-Russia Treaty of Friendship;Diplomacy
+74;2021;2021-04-10;2021-04-10;Ant Group restructuring ordered by Chinese regulators;Economy
+75;2021;2021-09-09;2021-09-09;BRICS Summit (hosted by China);BRICS
+76;2021;2021-08-17;2021-08-17;Central Financial and Economic Affairs Commission meeting on "Common Prosperity";Law
+77;2021;2021-07-30;2021-07-30;New regulations on algorithm recommendation services issued;Technology
+78;2021;2021-11-08;2021-11-11;Sixth Plenum of the 19th Central Committee adopts Third Historical Resolution;Domestic politics
+79;2021;2021-12-08;2021-12-10;Central Economic Work Conference;Economy
+80;2022;2022-01-28;2022-01-28;China launches new national integrated circuit (semiconductor) industry investment fund phase II expansion;Technology
+81;2022;2022-02-04;2022-02-20;Beijing Winter Olympic Games;Society
+82;2022;2022-03-05;2022-03-11;National People's Congress annual session;Domestic politics
+83;2022;2022-03-28;2022-03-28;Shanghai enters large-scale COVID lockdown;Society
+84;2022;2022-06-23;2022-06-23;BRICS Summit hosted by China (virtual);BRICS
+85;2022;2022-07-01;2022-07-01;Hong Kong 25th anniversary of handover and Xi Jinping visit;Domestic politics
+86;2022;2022-08-02;2022-08-02;Nancy Pelosi visit to Taiwan triggers China military exercises;Security
+87;2022;2022-09-15;2022-09-16;Shanghai Cooperation Organization summit Samarkand;Diplomacy
+88;2022;2022-09-15;2022-09-15;Xi–Putin bilateral meeting at SCO summit;Diplomacy
+89;2022;2022-10-16;2022-10-22;20th Communist Party Congress;Domestic politics
+90;2022;2022-11-15;2022-11-16;G20 summit Bali;Diplomacy
+91;2022;2022-11-14;2022-11-14;Xi–Biden meeting Bali;Diplomacy
+92;2022;2022-12-07;2022-12-07;China announces major relaxation of zero-COVID restrictions;Law
+93;2022;2022-12-15;2022-12-16;Central Economic Work Conference;Economy
+94;2023;2023-01-08;2023-01-08;China reopens borders after ending COVID travel restrictions;Economy
+95;2023;2023-02-04;2023-02-04;Chinese high-altitude balloon shot down by United States;Diplomacy
+96;2023;2023-03-20;2023-03-22;Xi Jinping state visit to Russia;Diplomacy
+97;2023;2023-03-05;2023-03-13;National People's Congress session;Domestic politics
+98;2023;2023-03-10;2023-03-10;Iran–Saudi Arabia diplomatic agreement brokered in Beijing;Diplomacy
+99;2023;2023-05-18;2023-05-19;China–Central Asia Summit Xi’an;Diplomacy
+100;2023;2023-06-04;2023-06-04;Li Shangfu speech Shangri-La Dialogue Singapore;Diplomacy
+101;2023;2023-08-24;2023-08-24;BRICS expansion decision Johannesburg summit;BRICS
+102;2023;2023-09-09;2023-09-10;G20 summit New Delhi;Diplomacy
+103;2023;2023-10-17;2023-10-18;Third Belt and Road Forum Beijing;BRI
+104;2023;2023-11-15;2023-11-15;Xi–Biden meeting during APEC summit San Francisco;Diplomacy
+105;2023;2023-11-15;2023-11-17;APEC summit San Francisco;Diplomacy
+106;2023;2023-12-11;2023-12-12;Central Economic Work Conference;Economy
+107;2024;2024-01-17;2024-01-17;China releases new measures to stabilize real estate sector;Economy
+108;2024;2024-02-08;2024-02-08;China issues new AI governance guidelines for generative AI services;Technology
+109;2024;2024-03-05;2024-03-11;National People's Congress session;Domestic politics
+110;2024;2024-05-05;2024-05-10;Xi Jinping state visits to France, Serbia and Hungary;Diplomacy
+111;2024;2024-05-24;2024-05-24;China launches new national semiconductor investment initiatives;Technology
+112;2024;2024-07-03;2024-07-04;Shanghai Cooperation Organization summit Astana;Diplomacy
+113;2024;2024-07-15;2024-07-18;Third Plenum of the 20th Central Committee;Domestic politics
+114;2024;2024-09-04;2024-09-06;Forum on China–Africa Cooperation Summit Beijing;Diplomacy
+115;2024;2024-10-01;2024-10-01;75th anniversary of the People's Republic of China;Society
+116;2024;2024-10-22;2024-10-24;BRICS Summit Kazan;BRICS
+117;2024;2024-11-18;2024-11-19;G20 Summit Rio de Janeiro;Diplomacy
+118;2024;2024-12-11;2024-12-12;Central Economic Work Conference;Economy
+119;2025;2025-01;2025-01;China's annual National Science and Technology Awards ceremony;Technology
+120;2025;2025-03;2025-03;National People's Congress annual session;Domestic politics
+121;2025;2025-04;2025-04;Boao Forum for Asia annual conference;Diplomacy
+122;2025;2025-06;2025-06;St. Petersburg International Economic Forum Chinese delegation participation;Diplomacy
+123;2025;2025-07;2025-07;Shanghai Cooperation Organization summit (scheduled host year);Diplomacy
+124;2025;2025-09;2025-09;BRICS Summit (Brazil host year);BRICS
+125;2025;2025-10;2025-10;Anticipated CCP Central Committee plenum on economic planning;Domestic politics
+126;2025;2025-10;2025-10;Draft discussions of 15th Five-Year Plan (2026–2030);Economy
+127;2025;2025-11;2025-11;G20 Summit (South Africa host year);Diplomacy
+128;2025;2025-11;2025-11;China International Import Expo Shanghai;Economy
+129;2025;2025-12;2025-12;Central Economic Work Conference;Economy
+130;2025;2025-12;2025-12;Year-end Politburo economic policy meeting;Domestic politics
+131;2026;2026-01;2026-01;Annual meeting of the CCP Central Commission for Discipline Inspection;Domestic politics
+132;2026;2026-03;2026-03;National People's Congress annual session;Domestic politics
+133;2026;2026-03;2026-03;Chinese People's Political Consultative Conference (CPPCC) annual session;Domestic politics
+134;2026;2026-03;2026-03;Formal start of the 15th Five-Year Plan (2026–2030);Economy
+135;2026;2026-04;2026-04;Boao Forum for Asia annual conference;Diplomacy
+136;2026;2026-06;2026-06;Shanghai Cooperation Organization summit (expected host rotation year);Diplomacy
+137;2026;2026-09;2026-09;BRICS Summit;BRICS
+138;2026;2026-11;2026-11;G20 Summit;Diplomacy
+139;2026;2026-12;2026-12;Central Economic Work Conference;Economy

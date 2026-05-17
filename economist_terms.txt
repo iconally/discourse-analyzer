@@ -1,0 +1,22 @@
+Civilization;强国;qiángguó;strong country;The Economist Newspaper
+International Order;百年未有之大变局;bǎinián wèiyǒu zhī dà biànjú;changes unseen in a hundred years;The Economist Newspaper
+Civilization;伟大事业;wěidà shìyè;great enterprise;The Economist Newspaper
+Development;高质量;gāo zhìliàng;high quality;The Economist Newspaper
+Development;数字;shùzì;digital;The Economist Newspaper
+Development;科技;kējì;technology;The Economist Newspaper
+Development;人工智能;réngōng zhìnéng;artificial intelligence;The Economist Newspaper
+Security;防卫;fángwèi;defend;The Economist Newspaper
+Security;保护;bǎohù;protect;The Economist Newspaper
+Governance;秩序;zhìxù;order;The Economist Newspaper
+Political Ethics;希望;xīwàng;hope;The Economist Newspaper
+Political Ethics;关心;guānxīn;care;The Economist Newspaper
+Political Ethics;奋斗;fèndòu;strive;The Economist Newspaper
+Political Ethics;相信;xiāngxìn;believe;The Economist Newspaper
+Governance;问题;wèntí;problems;The Economist Newspaper
+Cooperation;理解;lǐjiě;understand;The Economist Newspaper
+Cooperation;讨论;tǎolùn;discussion;The Economist Newspaper
+Cooperation;意见;yìjiàn;opinion;The Economist Newspaper
+Political Ethics;自我批评;zìwǒ pīpíng;self-criticism;The Economist Newspaper
+Governance;指出;zhǐchū;point out;The Economist Newspaper
+Development;科技;kējì;technology;Merics
+Governance;治理;zhìlǐ;governance;2013-2022 international addresses

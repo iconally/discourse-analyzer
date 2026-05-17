@@ -1,0 +1,34 @@
+virtue;道德;dàodé;morality / ethics / virtue;Confucian
+fairness;公正;gōngzhèng;impartial / fair;Cross-Tradition Terms
+fairness;公平;gōngpíng;fairness;Modern Sacral
+harmony;和谐;héxié;harmonious;Confucian
+naturalness;自然;zìrán;naturalness / spontaneity;Daoist
+wisdom;智慧;zhìhuì;wisdom / intelligence;Confucian
+righteousness;义务;yìwù;duty / obligation;Confucian
+trustworthiness;信用;xìnyòng;credit / trustworthiness;Confucian
+trustworthiness;可信;kěxìn;credible / trustworthy;Confucian
+civility;文明;wénmíng;civilization / civilized;Confucian
+dharma;非法;fēifǎ;non-dharma / wrong dharma;Buddhist
+essence;精神;jīngshén;essence and spirit;Daoist
+fate;命运共同体;mìngyùn gòngtóngtǐ;community of shared fate;Chinese Folk Religion
+comprehensiveness;全面;quánmiàn;comprehensive;Modern Sacral
+comprehensiveness;统筹;tǒngchóu;overall planning;Modern Sacral
+coordination;协调;xiétiáo;coordination;Modern Sacral
+coordination;协同;xiétóng;coordination / synergy;Modern Sacral
+legitimacy;合法;héfǎ;legal / legitimate;Modern Sacral
+legitimacy;正当;zhèngdàng;legitimate / proper;Modern Sacral
+mandate;职责;zhízé;duty / mandate;Modern Sacral
+order;有序;yǒuxù;orderly;Modern Sacral
+stability;稳定;wěndìng;stability;Modern Sacral
+transparency;透明;tòumíng;transparent;Modern Sacral
+transparency;公开;gōngkāi;open / public;Modern Sacral
+Modern Tianming;国运;Guóyùn;national destiny;Modern Sacral
+Modern Tianming;天命;Tiānmìng;Mandate of Heaven;Modern Sacral
+Modern Tianming;新质生产力;Xīnzhì shēngchǎnlì;new quality productive forces;Modern Sacral
+Modern Tianming;自主可控;Zìzhǔ kěkòng;self-reliant and controllable;Modern Sacral
+Modern Tianming;合法性;Héfǎxìng;legitimacy;Modern Sacral
+Modern Tianming;人工智能+;Réngōng zhìnéng jiā;AI Plus;Modern Sacral
+Modern Tianming;核心价值观;Héxīn jiàzhíguān;core values;Modern Sacral
+Modern Tianming;大模型;Dà móxíng;large models (LLM);Modern Sacral
+Modern Tianming;治理;Zhìlǐ;governance;Modern Sacral
+Modern Tianming;智能体;Zhìnéngtǐ;intelligent agents;Modern Sacral
